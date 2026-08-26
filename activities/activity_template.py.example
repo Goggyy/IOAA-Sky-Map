@@ -1,0 +1,57 @@
+"""Copy this file to activity_your_topic.py and edit the marked methods."""
+
+from __future__ import annotations
+
+import random
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from ioaa_trainer.activity_api import SkyActivity
+from ioaa_trainer.activity_ui import run_activity
+from ioaa_trainer.models import ActivityQuestion, SkyMapModel
+from ioaa_trainer.rendering import SkyMapRenderer
+
+
+class ExampleActivity(SkyActivity):
+    activity_id = "example"
+    title = "Example activity"
+    description = "Explain the skill practised by this activity."
+
+    def create_question(
+        self,
+        model: SkyMapModel,
+        rng: random.Random,
+    ) -> ActivityQuestion:
+        # Select any random target here. The complete calculated model is available.
+        del model, rng
+        return ActivityQuestion(
+            prompt="Your student-facing prompt.",
+            answer_text="A short explanation shown after Reveal answer.",
+            payload={"anything": "needed by draw_answer"},
+        )
+
+    def draw_answer(
+        self,
+        renderer: SkyMapRenderer,
+        model: SkyMapModel,
+        question: ActivityQuestion,
+    ) -> None:
+        # Example: highlight the galactic equator.
+        del question
+        renderer.draw_curve(
+            model.galactic_equator,
+            color=renderer.ANSWER,
+            linewidth=2.4,
+            alpha=1.0,
+            zorder=10,
+        )
+
+
+ACTIVITY_CLASS = ExampleActivity
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_activity(ACTIVITY_CLASS()))
