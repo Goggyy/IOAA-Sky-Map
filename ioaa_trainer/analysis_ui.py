@@ -10,8 +10,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 from .activity_api import SkyActivity
+from .astronomy import format_local_sidereal_time
 from .models import QuestionBundle
 from .rendering import RenderOptions, SkyMapRenderer
+from .theme import apply_night_theme, night_mode_enabled
+from .widgets import ToggleSwitch
 
 
 class AnalysisWindow(tk.Toplevel):
@@ -26,6 +29,8 @@ class AnalysisWindow(tk.Toplevel):
         super().__init__(parent)
         self.bundle = bundle
         self.activity = activity
+        self.night_mode = night_mode_enabled(parent)
+        apply_night_theme(self, self.night_mode)
         self.title(f"Analyse current sky — {activity.title}")
         self.geometry("1240x820")
         self.minsize(960, 680)
@@ -36,7 +41,7 @@ class AnalysisWindow(tk.Toplevel):
 
     def _build_variables(self) -> None:
         # The analysis page starts with the same clean star-only chart as the
-        # activity. Students can then add one reference layer at a time.
+        # exercise. Students can then add one reference layer at a time.
         self.direction_labels_var = tk.BooleanVar(value=False)
         self.altitude_grid_var = tk.BooleanVar(value=False)
         self.coordinate_grid_var = tk.BooleanVar(value=False)
@@ -47,6 +52,9 @@ class AnalysisWindow(tk.Toplevel):
         self.constellation_names_var = tk.BooleanVar(value=False)
         self.star_names_var = tk.BooleanVar(value=False)
         self.answer_var = tk.BooleanVar(value=False)
+        self.solar_system_objects_var = tk.BooleanVar(value=False)
+        self.solar_system_labels_var = tk.BooleanVar(value=False)
+        self.zenith_label_var = tk.BooleanVar(value=False)
         self.title_var = tk.BooleanVar(value=False)
         self.magnitude_var = tk.DoubleVar(
             value=self.bundle.model.settings.limiting_magnitude
@@ -95,11 +103,14 @@ class AnalysisWindow(tk.Toplevel):
             ("All constellation diagrams", self.constellation_lines_var),
             ("Constellation names", self.constellation_names_var),
             ("Bright-star names", self.star_names_var),
-            ("Activity answer highlight", self.answer_var),
+            ("Solar system objects", self.solar_system_objects_var),
+            ("Solar system object names", self.solar_system_labels_var),
+            ("Zenith label", self.zenith_label_var),
+            ("Exercise answer highlight", self.answer_var),
             ("Observation details title", self.title_var),
         ]
         for row, (label, variable) in enumerate(layer_variables):
-            ttk.Checkbutton(
+            ToggleSwitch(
                 layers,
                 text=label,
                 variable=variable,
@@ -148,7 +159,10 @@ class AnalysisWindow(tk.Toplevel):
             f"Latitude: {settings.latitude:.5f}°\n"
             f"Longitude: {settings.longitude:.5f}°\n"
             f"Time: {utc_time:%Y-%m-%d %H:%M:%S} UTC\n"
+            f"LST: {format_local_sidereal_time(settings)}\n"
             f"Map rotation: {settings.map_rotation_degrees:.1f}°\n"
+            f"Solar-system data: "
+            f"{'included' if settings.include_solar_system_objects else 'not included'}\n"
             f"Question seed: {self.bundle.seed}"
         )
         ttk.Label(
@@ -187,6 +201,7 @@ class AnalysisWindow(tk.Toplevel):
 
         self.figure = Figure(figsize=(8.5, 7.5), dpi=100)
         self.renderer = SkyMapRenderer(self.figure)
+        self.renderer.set_night_mode(self.night_mode)
         self.canvas = FigureCanvasTkAgg(self.figure, master=chart_frame)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
@@ -208,6 +223,9 @@ class AnalysisWindow(tk.Toplevel):
             show_constellation_lines=self.constellation_lines_var.get(),
             show_star_names=self.star_names_var.get(),
             show_coordinate_grid=self.coordinate_grid_var.get(),
+            show_solar_system_objects=self.solar_system_objects_var.get(),
+            show_solar_system_labels=self.solar_system_labels_var.get(),
+            show_zenith_label=self.zenith_label_var.get(),
             limiting_magnitude=self.magnitude_var.get(),
         )
 
@@ -222,13 +240,19 @@ class AnalysisWindow(tk.Toplevel):
             self._redraw()
 
     def _redraw(self) -> None:
-        overlay = None
-        if self.answer_var.get():
-            overlay = lambda renderer, model: self.activity.draw_answer(
+        def overlay(renderer: SkyMapRenderer, model) -> None:
+            self.activity.draw_question(
                 renderer,
                 model,
                 self.bundle.question,
             )
+            if self.answer_var.get():
+                self.activity.draw_answer(
+                    renderer,
+                    model,
+                    self.bundle.question,
+                )
+
         self.renderer.draw(self.bundle.model, self._render_options(), overlay)
         self.canvas.draw_idle()
 

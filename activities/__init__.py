@@ -1,1 +1,1 @@
-"""Activity modules discovered automatically by ``main.py``."""
+"""Exercise modules discovered automatically by ``main.py``."""

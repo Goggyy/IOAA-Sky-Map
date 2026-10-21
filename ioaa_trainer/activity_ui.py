@@ -1,4 +1,4 @@
-"""Reusable Tkinter application shell for every training activity."""
+"""Reusable Tkinter application shell for every training exercise."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import queue
 import random
 import secrets
 import sys
+import time
 import tkinter as tk
 from concurrent.futures import Future, ThreadPoolExecutor
 from tkinter import messagebox, ttk
@@ -17,13 +18,15 @@ from matplotlib.figure import Figure
 from .activity_api import QuestionUnavailable, SkyActivity
 from .analysis_ui import AnalysisWindow
 from .astronomy import CACHE_DIRECTORY, AstronomyData, SkyMapCalculator
+from .generation_settings import load_generation_settings
 from .models import QuestionBundle
 from .random_sky import RandomSkyGenerator
 from .rendering import RenderOptions, SkyMapRenderer
+from .theme import apply_night_theme
 
 
 class ActivityApplication(tk.Tk):
-    """Blind-map question flow used by all activities."""
+    """Blind-map question flow used by all exercises."""
 
     MAX_RANDOM_ATTEMPTS = 12
 
@@ -39,12 +42,19 @@ class ActivityApplication(tk.Tk):
             thread_name_prefix="ioaa-sky-question",
         )
         self._calculator = SkyMapCalculator(AstronomyData())
-        self._random_sky = RandomSkyGenerator()
+        self._generation_settings = load_generation_settings()
+        apply_night_theme(self, self._generation_settings.night_mode)
+        self._random_sky = RandomSkyGenerator(
+            generation_settings=self._generation_settings
+        )
         self._progress_messages: queue.SimpleQueue[str] = queue.SimpleQueue()
         self._bundle: QuestionBundle | None = None
         self._answer_revealed = False
         self._generation = 0
         self._question_count = 0
+        self._timer_started_at: float | None = None
+        self._timer_elapsed_seconds = 0.0
+        self._timer_job: str | None = None
 
         self._build_variables()
         self._build_ui()
@@ -56,6 +66,7 @@ class ActivityApplication(tk.Tk):
         self.answer_text_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="Starting…")
         self.question_number_var = tk.StringVar(value="Question")
+        self.timer_var = tk.StringVar(value="Time: 00:00.0")
 
     def _build_ui(self) -> None:
         self.columnconfigure(1, weight=1)
@@ -96,6 +107,11 @@ class ActivityApplication(tk.Tk):
             wraplength=285,
             justify="left",
         ).grid(row=1, column=0, sticky="ew", pady=(9, 0))
+        ttk.Label(
+            prompt_frame,
+            textvariable=self.timer_var,
+            font=("TkDefaultFont", 10, "bold"),
+        ).grid(row=2, column=0, sticky="w", pady=(10, 0))
 
         actions = ttk.Frame(controls)
         actions.grid(row=3, column=0, sticky="ew", pady=(14, 0))
@@ -152,6 +168,7 @@ class ActivityApplication(tk.Tk):
 
         self.figure = Figure(figsize=(8.2, 7.2), dpi=100)
         self.renderer = SkyMapRenderer(self.figure)
+        self.renderer.set_night_mode(self._generation_settings.night_mode)
         self.canvas = FigureCanvasTkAgg(self.figure, master=chart_frame)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
@@ -165,6 +182,9 @@ class ActivityApplication(tk.Tk):
         self.bind("<Control-n>", lambda _event: self.new_question())
 
     def new_question(self) -> None:
+        self._stop_timer()
+        self._timer_elapsed_seconds = 0.0
+        self.timer_var.set("Time: 00:00.0")
         self._generation += 1
         generation = self._generation
         self._bundle = None
@@ -252,6 +272,7 @@ class ActivityApplication(tk.Tk):
         self.question_number_var.set(f"Question {self._question_count}")
         self.prompt_frame.configure(text=self.question_number_var.get())
         self._draw_current_map()
+        self._start_timer()
         self.reveal_button.configure(state="normal")
         self.new_button.configure(state="disabled")
         self.status_var.set(
@@ -261,16 +282,26 @@ class ActivityApplication(tk.Tk):
     def _draw_current_map(self) -> None:
         if self._bundle is None:
             return
-        overlay = None
-        if self._answer_revealed:
-            overlay = lambda renderer, model: self.activity.draw_answer(
+        def overlay(renderer: SkyMapRenderer, model) -> None:
+            self.activity.draw_question(
                 renderer,
                 model,
                 self._bundle.question,
             )
+            if self._answer_revealed:
+                self.activity.draw_answer(
+                    renderer,
+                    model,
+                    self._bundle.question,
+                )
+
         self.renderer.draw(
             self._bundle.model,
-            RenderOptions.blind(),
+            RenderOptions(
+                show_solar_system_objects=(
+                    self._bundle.model.settings.include_solar_system_objects
+                )
+            ),
             answer_overlay=overlay,
         )
         self.canvas.draw_idle()
@@ -279,12 +310,58 @@ class ActivityApplication(tk.Tk):
         if self._bundle is None or self._answer_revealed:
             return
         self._answer_revealed = True
+        self._stop_timer()
         self.answer_text_var.set(self._bundle.question.answer_text)
         self.reveal_button.configure(state="disabled")
         self.new_button.configure(state="normal")
         self.analysis_button.configure(state="normal")
-        self.status_var.set("Answer revealed. Generate another question or analyse this sky.")
+        self.status_var.set(
+            "Answer revealed after "
+            f"{self._format_elapsed(self._timer_elapsed_seconds)}. "
+            "Generate another question or analyse this sky."
+        )
         self._draw_current_map()
+
+    @staticmethod
+    def _format_elapsed(seconds: float) -> str:
+        tenths = max(0, int(round(seconds * 10.0)))
+        minutes, tenths_remainder = divmod(tenths, 600)
+        whole_seconds, tenth = divmod(tenths_remainder, 10)
+        if minutes >= 60:
+            hours, minutes = divmod(minutes, 60)
+            return f"{hours:d}:{minutes:02d}:{whole_seconds:02d}.{tenth}"
+        return f"{minutes:02d}:{whole_seconds:02d}.{tenth}"
+
+    def _start_timer(self) -> None:
+        self._stop_timer()
+        self._timer_elapsed_seconds = 0.0
+        self._timer_started_at = time.perf_counter()
+        self._update_timer()
+
+    def _update_timer(self) -> None:
+        if self._timer_started_at is None or self._answer_revealed:
+            return
+        self._timer_elapsed_seconds = time.perf_counter() - self._timer_started_at
+        self.timer_var.set(
+            f"Time: {self._format_elapsed(self._timer_elapsed_seconds)}"
+        )
+        self._timer_job = self.after(100, self._update_timer)
+
+    def _stop_timer(self) -> None:
+        if self._timer_started_at is not None:
+            self._timer_elapsed_seconds = (
+                time.perf_counter() - self._timer_started_at
+            )
+            self._timer_started_at = None
+            self.timer_var.set(
+                f"Time: {self._format_elapsed(self._timer_elapsed_seconds)}"
+            )
+        if self._timer_job is not None:
+            try:
+                self.after_cancel(self._timer_job)
+            except tk.TclError:
+                pass
+            self._timer_job = None
 
     def open_analysis(self) -> None:
         if self._bundle is None or not self._answer_revealed:
@@ -292,6 +369,7 @@ class ActivityApplication(tk.Tk):
         AnalysisWindow(self, self._bundle, self.activity)
 
     def _on_close(self) -> None:
+        self._stop_timer()
         self._generation += 1
         self._executor.shutdown(wait=False, cancel_futures=True)
         self.destroy()
@@ -299,7 +377,7 @@ class ActivityApplication(tk.Tk):
 
 def dependency_check(activity: SkyActivity) -> int:
     print("Python:", sys.version.split()[0])
-    print("Activity:", activity.title)
+    print("Exercise:", activity.title)
     print("Cache directory:", CACHE_DIRECTORY)
     print("Core imports succeeded.")
     return 0

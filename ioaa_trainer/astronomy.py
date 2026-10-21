@@ -18,6 +18,7 @@ from astropy.coordinates import (
     GeocentricTrueEcliptic,
     ICRS,
     SkyCoord,
+    get_body,
 )
 from astropy.time import Time
 from astropy.utils import iers
@@ -31,6 +32,7 @@ from .models import (
     LabelPoint,
     MapSettings,
     SkyMapModel,
+    SolarSystemObject,
     StarLayer,
 )
 
@@ -85,6 +87,7 @@ BRIGHT_STAR_NAMES: dict[int, str] = {
     65474: "Spica",
     68702: "Hadar",
     69673: "Arcturus",
+    71683: "Rigil Kentaurus",
     80763: "Antares",
     85927: "Shaula",
     91262: "Vega",
@@ -95,8 +98,27 @@ BRIGHT_STAR_NAMES: dict[int, str] = {
 }
 
 
+def local_sidereal_time_hours(settings: MapSettings) -> float:
+    """Return apparent local sidereal time in decimal hours."""
+    observation_time = Time(settings.observation_datetime)
+    angle = observation_time.sidereal_time(
+        "apparent",
+        longitude=float(settings.longitude) * u.deg,
+    )
+    return float(angle.hour % 24.0)
+
+
+def format_local_sidereal_time(settings: MapSettings) -> str:
+    """Format apparent LST as HH:MM:SS."""
+    total_seconds = int(round(local_sidereal_time_hours(settings) * 3600.0))
+    total_seconds %= 24 * 3600
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
 class AstronomyData:
-    """Load and cache the catalogue files shared by all activities."""
+    """Load and cache the catalogue files shared by all exercises."""
 
     def __init__(self, cache_directory: Path = CACHE_DIRECTORY) -> None:
         self._loader = Loader(str(cache_directory), verbose=False)
@@ -130,7 +152,7 @@ class AstronomyData:
 
 
 class SkyMapCalculator:
-    """Calculate every layer once so activities can redraw instantly."""
+    """Calculate every layer once so exercises can redraw instantly."""
 
     def __init__(self, data: AstronomyData | None = None) -> None:
         self._data = data or AstronomyData()
@@ -168,7 +190,12 @@ class SkyMapCalculator:
         star_altaz = star_coords.transform_to(altaz_frame)
         star_alt = np.asarray(star_altaz.alt.deg, dtype=float)
         star_az = np.asarray(star_altaz.az.deg, dtype=float)
-        visible = np.isfinite(star_alt) & np.isfinite(star_az) & (star_alt > 0.0)
+        minimum_altitude = 90.0 - float(settings.sky_radius_degrees)
+        visible = (
+            np.isfinite(star_alt)
+            & np.isfinite(star_az)
+            & (star_alt >= minimum_altitude)
+        )
 
         visible_hip = stars_to_plot.index.to_numpy(dtype=int)[visible]
         visible_alt = star_alt[visible]
@@ -202,6 +229,7 @@ class SkyMapCalculator:
             constellations,
             constellation_names,
             altaz_frame,
+            minimum_altitude,
         )
 
         report("Calculating reference lines and coordinate grid…")
@@ -209,6 +237,16 @@ class SkyMapCalculator:
         celestial_equator = self._equatorial_curve(0.0, altaz_frame)
         galactic_equator = self._galactic_curve(altaz_frame)
         coordinate_grid = self._coordinate_grid(altaz_frame)
+        solar_system_objects = (
+            self._solar_system_objects(
+                observation_time,
+                location,
+                altaz_frame,
+                minimum_altitude,
+            )
+            if settings.include_solar_system_objects
+            else ()
+        )
 
         return SkyMapModel(
             settings=settings,
@@ -221,7 +259,51 @@ class SkyMapCalculator:
             celestial_equator=celestial_equator,
             galactic_equator=galactic_equator,
             coordinate_grid=coordinate_grid,
+            solar_system_objects=solar_system_objects,
         )
+
+
+    def _solar_system_objects(
+        self,
+        observation_time: Time,
+        location: EarthLocation,
+        altaz_frame: AltAz,
+        minimum_altitude: float,
+    ) -> tuple[SolarSystemObject, ...]:
+        """Calculate topocentric positions using Astropy's built-in ephemeris."""
+        object_names = (
+            "Sun",
+            "Moon",
+            "Mercury",
+            "Venus",
+            "Mars",
+            "Jupiter",
+            "Saturn",
+            "Uranus",
+            "Neptune",
+        )
+        visible: list[SolarSystemObject] = []
+        for display_name in object_names:
+            coordinate = get_body(
+                display_name.lower(),
+                observation_time,
+                location=location,
+            ).transform_to(altaz_frame)
+            altitude = float(coordinate.alt.deg)
+            azimuth = float(coordinate.az.deg)
+            if (
+                np.isfinite(altitude)
+                and np.isfinite(azimuth)
+                and altitude >= minimum_altitude
+            ):
+                visible.append(
+                    SolarSystemObject(
+                        name=display_name,
+                        altitude=altitude,
+                        azimuth=azimuth,
+                    )
+                )
+        return tuple(visible)
 
     @staticmethod
     def _to_altaz(coords: SkyCoord, frame: AltAz) -> tuple[np.ndarray, np.ndarray]:
@@ -237,6 +319,7 @@ class SkyMapCalculator:
         constellations: list[tuple[str, list[tuple[int, int]]]],
         constellation_names: dict[str, str],
         altaz_frame: AltAz,
+        minimum_altitude: float,
     ) -> tuple[tuple[ConstellationEdge, ...], tuple[LabelPoint, ...]]:
         endpoint_ids = sorted(
             {
@@ -283,8 +366,8 @@ class SkyMapCalculator:
                     continue
                 alt_1, az_1 = horizontal[hip_1]
                 alt_2, az_2 = horizontal[hip_2]
-                # Only complete above-horizon line segments are retained.
-                if alt_1 <= 0.0 or alt_2 <= 0.0:
+                # Keep complete segments within the selected chart coverage.
+                if alt_1 < minimum_altitude or alt_2 < minimum_altitude:
                     continue
                 rendered_edges.append(
                     ConstellationEdge(
@@ -319,7 +402,11 @@ class SkyMapCalculator:
                 centroid_alt,
                 centroid_az,
             ):
-                if np.isfinite(alt) and np.isfinite(az) and alt > 3.0:
+                if (
+                    np.isfinite(alt)
+                    and np.isfinite(az)
+                    and alt > minimum_altitude + 3.0
+                ):
                     labels.append(
                         LabelPoint(
                             constellation_names.get(abbreviation, abbreviation),

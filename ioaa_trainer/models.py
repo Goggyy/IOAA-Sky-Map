@@ -18,6 +18,10 @@ class MapSettings:
     observation_datetime: datetime
     limiting_magnitude: float = 6.5
     map_rotation_degrees: float = 0.0
+    include_solar_system_objects: bool = False
+    inverted_colors: bool = False
+    sky_radius_degrees: float = 90.0
+    star_marker_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,13 @@ class ConstellationEdge:
 
 
 @dataclass(frozen=True)
+class SolarSystemObject:
+    name: str
+    altitude: float
+    azimuth: float
+
+
+@dataclass(frozen=True)
 class Curve:
     altitude: np.ndarray
     azimuth: np.ndarray
@@ -63,17 +74,26 @@ class SkyMapModel:
     celestial_equator: Curve
     galactic_equator: Curve
     coordinate_grid: tuple[Curve, ...]
+    solar_system_objects: tuple[SolarSystemObject, ...] = ()
 
     def visible_constellation_edge_counts(self) -> dict[str, int]:
+        """Count complete line segments above the physical horizon.
+
+        A chart can optionally extend below the horizon, but exercises that
+        ask for a currently visible constellation retain their original
+        above-horizon meaning.
+        """
         counts: dict[str, int] = {}
         for edge in self.constellation_edges:
+            if edge.altitude_1 <= 0.0 or edge.altitude_2 <= 0.0:
+                continue
             counts[edge.abbreviation] = counts.get(edge.abbreviation, 0) + 1
         return counts
 
 
 @dataclass(frozen=True)
 class ActivityQuestion:
-    """A prompt plus activity-specific answer data."""
+    """A prompt plus exercise-specific answer data."""
 
     prompt: str
     answer_text: str
