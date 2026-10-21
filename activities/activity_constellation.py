@@ -1,4 +1,4 @@
-"""Activity 3: locate a randomly selected visible constellation."""
+"""Exercise 3: locate a randomly selected visible constellation."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from ioaa_trainer.rendering import SkyMapRenderer
 
 class ConstellationActivity(SkyActivity):
     activity_id = "constellation"
-    title = "Activity 3 — Locate a Constellation"
+    title = "Exercise 3 — Locate a Constellation"
     description = (
         "A constellation with a useful part of its line diagram above the horizon is "
         "selected at random. Locate it using only the blind star map."

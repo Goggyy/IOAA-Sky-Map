@@ -1,4 +1,4 @@
-"""Activity 1: identify the celestial equator on a blind sky map."""
+"""Exercise 1: celestial equator, cardinal directions, pole, and latitude."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from ioaa_trainer.rendering import SkyMapRenderer
 
 class CelestialEquatorActivity(SkyActivity):
     activity_id = "celestial_equator"
-    title = "Activity 1 — Celestial Equator"
+    title = "Exercise 1 — Celestial Equator and Cardinal Directions"
     description = (
-        "Use the stellar pattern in a randomly generated, unlabeled sky to identify "
-        "the celestial equator."
+        "Identify the celestial equator, the four cardinal directions, one celestial "
+        "pole, and estimate the observer's latitude from a blind sky map."
     )
 
     def create_question(
@@ -28,10 +28,36 @@ class CelestialEquatorActivity(SkyActivity):
         model: SkyMapModel,
         rng: random.Random,
     ) -> ActivityQuestion:
-        del model, rng
+        del rng
+        latitude = float(model.settings.latitude)
+        north_pole = latitude >= 0.0
+        pole_name = "North celestial pole"
+        pole_short = "NCP"
+        pole_azimuth = 0.0
+        if not north_pole:
+            pole_name = "South celestial pole"
+            pole_short = "SCP"
+            pole_azimuth = 180.0
+        pole_altitude = abs(latitude)
+        hemisphere = "N" if latitude >= 0.0 else "S"
+        latitude_text = f"{abs(latitude):.1f}° {hemisphere}"
         return ActivityQuestion(
-            prompt="Draw in the celestial equator.",
-            answer_text="The highlighted line is the celestial equator (declination 0°).",
+            prompt=(
+                "Draw in the celestial equator. Identify north, south, east, and "
+                "west; locate one celestial pole; and estimate the observer's latitude."
+            ),
+            answer_text=(
+                "The celestial equator and cardinal directions are labelled. "
+                f"The marked pole is the {pole_name} ({pole_short}). "
+                f"Observer latitude: {latitude_text}."
+            ),
+            payload={
+                "pole_name": pole_name,
+                "pole_short": pole_short,
+                "pole_altitude": pole_altitude,
+                "pole_azimuth": pole_azimuth,
+                "latitude_text": latitude_text,
+            },
         )
 
     def draw_answer(
@@ -40,13 +66,56 @@ class CelestialEquatorActivity(SkyActivity):
         model: SkyMapModel,
         question: ActivityQuestion,
     ) -> None:
-        del question
         renderer.draw_curve(
             model.celestial_equator,
             color=renderer.ANSWER,
             linewidth=2.4,
             alpha=1.0,
             zorder=10,
+        )
+        renderer.draw_cardinal_labels()
+
+        pole_altitude = float(question.payload["pole_altitude"])
+        pole_azimuth = float(question.payload["pole_azimuth"])
+        pole_radius = 90.0 - pole_altitude
+        sky_radius = float(model.settings.sky_radius_degrees)
+        pole_label = (
+            f"{question.payload['pole_name']} "
+            f"({question.payload['pole_short']})"
+        )
+        if pole_radius <= sky_radius:
+            renderer.draw_target_point(
+                pole_altitude,
+                pole_azimuth,
+                color=renderer.ANSWER,
+                size=90.0,
+                zorder=12,
+            )
+            renderer.draw_upright_label(
+                pole_altitude,
+                pole_azimuth,
+                pole_label,
+                color=renderer.ANSWER,
+                fontsize=9.0,
+                offset_points=(8.0, 7.0),
+                zorder=13,
+            )
+        else:
+            edge_altitude = 90.0 - max(2.0, sky_radius - 4.0)
+            renderer.draw_upright_label(
+                edge_altitude,
+                pole_azimuth,
+                f"{pole_label} — beyond chart edge",
+                color=renderer.ANSWER,
+                fontsize=8.5,
+                offset_points=(5.0, 4.0),
+                zorder=13,
+            )
+
+        renderer.draw_answer_note(
+            "Celestial equator highlighted\n"
+            f"Latitude ≈ {question.payload['latitude_text']}\n"
+            f"Pole altitude = {pole_altitude:.1f}°"
         )
 
 

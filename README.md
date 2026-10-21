@@ -2,72 +2,100 @@
 
 This is a python Tkinter application used for practising sky-map skills for the observation section of the IOAA. The activities uses a randomly generated sky-map with data from the Hipparcos catalogue and Stellarium constellation diagrams and the positions are plotted via zenithal-equidistant polar projection.
 
-Activity questions involve identifying Celestial Equator, Ecliptic and Constellation - questions that are all likely to be tested in the IOAA.
+Activity questions involve identifying Celestial Equator, Ecliptic and Constellations among other commonly tested questions at the IOAA.
 
 After revealing the answer to an activity, the current sky can be analysed where reference coordinates, constellation lines and labels can be toggled on.
 
 Below are further specifications about the program:
 
-## Included activities
+## Included exercises
 
-1. **Celestial Equator** — identify the celestial equator.
-2. **Ecliptic** — identify the ecliptic.
-3. **Locate a Constellation** — locate a randomly selected constellation that has at least three visible diagram segments above the horizon.
+1. **Celestial Equator and Cardinal Directions** — identify the celestial equator, cardinal directions, one celestial pole, and estimate the observer's latitude.
+2. **Ecliptic** — identify the ecliptic and zodiacal constellation
+3. **Locate a Constellation** — locate a randomly chosen constellation above the horizon
+4. **Locate a Zodiacal Constellation** — locate one of the 13 constellations zodiacal constellations, including Ophiuchus.
+5. **Name the Constellation** — identify a randomly circled constellation above the horizon
+6. **Name the Star** — identify a circled bright star by its IAU name and Bayer designation.
+
+A timer begins when a new sky map displays and stops when **Reveal answer** is selected, just used for the user as a reference and simulate exam conditions.
+
+## Home page
+
+The launcher contains three tabs:
+
+- **Exercises** — the default main page containing all training exercises.
+- **Tools** — automatically discovered, independently runnable astronomy utilities.
+- **Random sky settings** — constraints and view settings used by newly opened exercises.
+
+The **Instructions & About…** button is located in the global header so it remains available regardless of the selected tab. All Boolean layer and view controls are displayed as compact borderless sliding switches, and scrollable settings pages use eased mouse-wheel and trackpad movement.
 
 ## Project structure
 
 ```text
 ioaa_sky_trainer/
-├── main.py                         
+├── main.py
+├── sky_map_generator.py
 ├── requirements.txt
 ├── run_windows.bat
 ├── run_macos_linux.sh
-├── activities/
+├── activities/                       # Legacy folder name retained for compatibility
 │   ├── activity_celestial_equator.py
 │   ├── activity_ecliptic.py
 │   ├── activity_constellation.py
+│   ├── activity_zodiac_constellation.py
+│   ├── activity_name_constellation.py
+│   ├── activity_name_star.py
 │   └── activity_template.py.example
+├── tools/
+│   ├── tool_sky_map_generator.py
+│   └── tool_template.py.example
 └── ioaa_trainer/
-    ├── activity_api.py             # Small interface implemented by activities
-    ├── activity_ui.py              # Reusable blind-question UI
-    ├── analysis_ui.py              # Reusable full analysis window
-    ├── astronomy.py                # Catalogue loading and coordinate transforms
-    ├── models.py                   # Shared immutable data objects
-    ├── random_sky.py               # Random location/time generation
-    └── rendering.py                # Blind and analysis chart rendering
+    ├── activity_api.py                # Legacy API names retained for compatibility
+    ├── activity_ui.py
+    ├── analysis_ui.py
+    ├── astronomy.py
+    ├── generation_settings.py
+    ├── generator_ui.py
+    ├── help_ui.py
+    ├── models.py
+    ├── random_sky.py
+    ├── reference_data.py
+    ├── rendering.py
+    ├── targeting.py
+    ├── theme.py
+    ├── time_utils.py
+    ├── widgets.py
+    └── tool_api.py
 ```
 
-The launcher automatically discovers files named `activities/activity_*.py` that export an `ACTIVITY_CLASS`.
+The launcher automatically discovers:
+
+- Files named `activities/activity_*.py` that export `ACTIVITY_CLASS`.
+- Files named `tools/tool_*.py` that export `TOOL_CLASS`.
+
+The older internal names are retained so existing exercise modules and saved projects continue to work unchanged.
 
 ## Requirements
 
 - Python 3.11 or newer is recommended.
-- Tkinter support must be installed with Python.
+- Tkinter support must be included with Python.
 - Internet access is required on the first run.
 
-The first run downloads the Hipparcos catalogue and a pinned Stellarium constellation-line file. They are cached in:
+The first run downloads the Hipparcos catalogue and a pinned Stellarium constellation-line file. Catalogue data and launcher settings are stored under:
 
 ```text
 ~/.ioaa_sky_trainer
 ```
 
-Later runs use the cache.
+## Windows setup
 
-# Windows: step-by-step
+Extract the ZIP, open the project folder, and double-click:
 
-## Option A: automatic launcher
+```text
+run_windows.bat
+```
 
-1. Extract the ZIP file.
-2. Open the extracted `ioaa_sky_trainer` folder.
-3. Double-click `run_windows.bat`.
-4. On first use, the script creates `.venv` and installs the dependencies.
-5. Select an activity from the launcher.
-
-If Windows asks which Python to use, install Python 3.11 or newer from python.org and enable **Add Python to PATH** during installation.
-
-## Option B: PowerShell commands
-
-Open PowerShell in the project directory and run:
+Manual PowerShell setup:
 
 ```powershell
 py -3.11 -m venv .venv
@@ -84,32 +112,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .venv\Scripts\Activate.ps1
 ```
 
-You can avoid activation entirely:
-
-```powershell
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe main.py
-```
-
-# macOS: step-by-step
-
-1. Extract the ZIP file.
-2. Open Terminal.
-3. Change to the project folder, for example:
+## macOS setup
 
 ```bash
 cd ~/Downloads/ioaa_sky_trainer
-```
-
-4. Run the launcher script:
-
-```bash
-./run_macos_linux.sh
-```
-
-If macOS reports that the file is not executable:
-
-```bash
 chmod +x run_macos_linux.sh
 ./run_macos_linux.sh
 ```
@@ -124,104 +130,168 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-Use a Python installation that includes Tk. If `import tkinter` fails, install a matching Tk package or use the Python installer from python.org.
+Use a Python installation that includes Tkinter. The Python installer from python.org normally includes it.
 
-# Ubuntu or Debian: step-by-step
-
-Install the operating-system Tk and virtual-environment packages:
+## Ubuntu or Debian setup
 
 ```bash
 sudo apt update
 sudo apt install python3 python3-tk python3-venv
-```
-
-Then run:
-
-```bash
 cd ~/Downloads/ioaa_sky_trainer
+chmod +x run_macos_linux.sh
 ./run_macos_linux.sh
 ```
 
-Manual setup is the same as macOS:
+## Using the exercise timer
+
+1. The timer remains at zero while the astronomical data is being calculated.
+2. It starts when the blind map and prompt are ready.
+3. It updates to one tenth of a second.
+4. It stops permanently for that question when **Reveal answer** is pressed.
+5. A new question resets it to zero.
+
+## Configuring generated exercise skies
+
+Open `main.py` and select **Random sky settings**.
+
+### Solar-system objects
+
+Enable **Include visible Sun, Moon, and planets** to add unlabelled solar-system markers. It is disabled by default, preserving the original star-only exercise maps.
+
+### Coordinates
+
+Choose either:
+
+- **Random coordinates** — latitude is sampled uniformly over Earth's surface and longitude uniformly from −180° to +180°.
+- **Fixed coordinates** — enter latitude and longitude in degrees.
+
+North and east are positive; south and west are negative.
+
+### Time
+
+Choose one of four forms:
+
+- **Random UTC date and time** — sampled between 1 January 2020 and 31 December 2035.
+- **Fixed UTC date and time** — enter `YYYY-MM-DD` and `HH:MM:SS`.
+- **Fixed local sidereal time (LST)** — enter an LST as `HH:MM:SS` or decimal hours plus a UTC reference date. The selected longitude is used to resolve the UTC instant.
+- **Fixed Modified Julian Date (MJD)** — enter a numeric UTC MJD.
+
+### View
+
+- **Default colours** — use a white chart with black star markers.
+- **Invert map colours** — switches to white stars and labels on a black chart.
+- **Night mode** — changes the application interface and all charts to a black-and-red palette designed to avoid white and blue light during observations. The saved choice is used by the launcher, exercises, analysis windows, help, and tools.
+- **Sky coverage from zenith** — the control runs from 0° (the zenith point) through 90° (the default hemisphere ending at the horizon) to 180° (the full celestial sphere).
+- **Faintest visible magnitude** — lower values show only brighter stars; higher values include fainter stars, up to magnitude 8.0.
+- **Star marker scale** — changes marker sizes without changing the selected stars.
+- **Randomise map rotation** — enabled by default; switch it off to keep north up.
+
+Select **Save settings**. Newly launched exercise windows use the saved values. An exercise already open continues using the settings with which it started.
+
+## Using an exercise
+
+1. Wait for the blind map and timer to appear.
+2. Solve the prompt using the star pattern.
+3. Select **Reveal answer** to stop the timer and display the answer.
+4. Select **New random question** or **Analyse current sky…**.
+
+The blind map hides ordinary coordinates, grids, constellation labels, location, and time. Exercises 5 and 6 retain their target circles. The chart is north-up unless random map rotation is enabled in Random sky settings. Exercise 1 reveals its requested cardinal-direction and pole labels only after the answer is revealed.
+
+## Analysis window
+
+All optional layers start switched off. Available controls include:
+
+- Horizon directions
+- Altitude/azimuth grid
+- RA/Dec grid
+- Ecliptic
+- Celestial equator
+- Galactic equator
+- Constellation diagrams
+- Constellation names
+- Bright-star names
+- Solar-system objects
+- Solar-system object names
+- Zenith label
+- Exercise answer highlight
+- Observation details title
+- Faintest visible stellar magnitude
+
+The observation panel displays latitude, longitude, UTC, apparent local sidereal time (LST), map rotation, and question seed. The saved chart colours, sky coverage, and default star marker scale remain consistent with the exercise chart.
+
+## Tools
+
+The **Tools** tab uses the same modular card layout as the Exercises tab. Each tool is an independent file and may also be run directly.
+
+### Sky Map Generator
+
+Open **Sky Map Generator** from the Tools tab, or run:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python main.py
+python sky_map_generator.py
 ```
 
-```bash
-python activities/activity_celestial_equator.py
-python activities/activity_ecliptic.py
-python activities/activity_constellation.py
-```
+The generator provides two ways to place the sky:
 
-On Windows without activating the virtual environment:
+- **Observer location + time** — enter latitude/longitude and supply time as UTC, LST plus reference date, or MJD.
+- **Direct zenith** — drag a marker on an equirectangular celestial-sphere projection to place the right ascension and declination at the centre of the chart. For precise placement, enter RA as decimal hours or `HH:MM:SS` and Dec as decimal degrees in the manual controls below the projection. The highlighted spherical-cap boundary shows the area included by the current field-of-view setting. The declination becomes the synthetic observer latitude and the RA becomes LST for the selected reference date.
 
-```powershell
-.venv\Scripts\python.exe activities\activity_constellation.py
-```
+The generator recalculates automatically after observation inputs settle; there is no separate Generate button. In direct-zenith mode the chart keeps recalculating while the zenith marker is dragged. The **View** tab controls colour inversion, distance from zenith (0°–180°), faintest visible magnitude, star-marker scale, and optional map rotation. Rotation is disabled by default, giving a north-up map. At 90° the chart is one visible hemisphere; at 180° it is a full-sky zenithal-equidistant projection with the nadir at the outer edge. Because the full sphere is calculated internally, coverage, layer, colour, magnitude, marker-size, and rotation changes redraw immediately. The generator also retains study-view, navigation, and PNG-export controls.
 
-# Activity Specifications
+### Adding a new tool
 
-1. The program generates a random Earth location and a random UTC time between 2020 and 2035.
-2. The question map displays only stars and the horizon circle. It contains no direction labels, coordinate labels, grids, constellation lines, constellation names, or reference lines.
-3. Read the prompt and identify the requested feature mentally or on paper.
-4. Select **Reveal answer**.
-5. Choose either:
-   - **New random question**, or
-   - **Analyse current sky…**
-6. In the analysis window, toggle any of these layers:
-   - Horizon directions
-   - Altitude/azimuth grid
-   - RA/Dec coordinate grid
-   - Ecliptic
-   - Celestial equator
-   - Galactic equator
-   - All constellation diagrams
-   - Constellation names
-   - Bright-star names
-   - Activity-answer highlight
-   - Observation details title
-7. Adjust **Faintest visible magnitude** to show only brighter stars or include fainter stars down to the catalogue limit used for the question.
-8. The analysis window also reveals the latitude, longitude, UTC time, map rotation, and question seed, and can export a PNG.
+1. Copy `tools/tool_template.py.example`.
+2. Rename it to `tools/tool_something.py`.
+3. Set the tool's `tool_id`, `title`, and `description`.
+4. Implement the directly runnable `run_tool()` function.
+5. Export the class as `TOOL_CLASS`.
 
-All analysis overlays are initially switched off, so the analysis window opens with the same clean star field as the question. Text labels remain upright even when the map has a random rotation.
+The launcher discovers the tool automatically and displays it on the Tools tab without changes to `main.py`.
 
-# Command-line checks
+## Instructions page
 
-After installing dependencies, verify discovery and imports without opening windows:
+Select **Instructions & About…** in the launcher header. It explains the exercise workflow, keyboard shortcuts, chart geometry, saved settings, tool system, map generator, first-run downloads, and extension process.
+
+## Adding a new exercise
+
+1. Copy `activities/activity_template.py.example`.
+2. Rename it to `activities/activity_something.py`.
+3. Implement `create_question()` and `draw_answer()`.
+4. Override `draw_question()` only when a marker must be shown before reveal.
+5. Export the class as `ACTIVITY_CLASS`.
+
+The launcher discovers it automatically. Shared timing, random-sky constraints, view settings, answer flow, and analysis support are applied without additional exercise code.
+
+If a generated sky is unsuitable, raise `QuestionUnavailable` and the framework will try another sky.
+
+## Command-line checks
+
+After installing dependencies:
 
 ```bash
 python main.py --check
 python activities/activity_constellation.py --check
+python tools/tool_sky_map_generator.py
+python -m compileall -q .
 ```
 
-# Randomisation details
+## Accuracy and scope
 
-- Longitude is uniformly sampled from −180° to +180°.
-- Latitude is sampled uniformly over Earth’s surface using a uniform value of `sin(latitude)`, avoiding an artificial excess of polar questions.
-- Time is sampled uniformly between 1 January 2020 and 31 December 2035 in UTC.
-- Map rotation is sampled uniformly from 0° to 360° and remains fixed for the question, answer, and analysis view.
-- The observation details are hidden during the blind question and revealed only in the analysis window.
-- Each question stores a seed that can be recorded for diagnostics or future reproducibility work.
-
-# Accuracy and scope
-
-- The chart is intended for visual training, not precision astrometric measurement.
+- The maps are intended for visual training rather than precision astrometry.
 - Atmospheric refraction is disabled; the geometric horizon is used.
 - Stellar proper motion is not applied.
-- Constellation lines are the selected Stellarium sky-culture diagrams.
-- A constellation edge is drawn only when both endpoint stars are above the horizon.
-- Astropy uses its bundled Earth-orientation data without a separate IERS download.
+- Solar-system positions use Astropy's built-in ephemeris.
+- Local sidereal time is apparent LST for the entered longitude.
+- Constellation lines use the selected Stellarium line diagrams.
+- The catalogue and constellation layers are clipped to the selected zenith-distance coverage.
+- Exercises that ask for a visible constellation continue to select targets using above-horizon line segments.
+- Astropy uses bundled Earth-orientation data without a separate IERS download.
 
-# Troubleshooting
+## Troubleshooting
 
-## `No module named tkinter`
+### `No module named tkinter`
 
-Tkinter is supplied by the operating system or Python installer rather than `pip`.
+Tkinter is provided by the operating system or Python installer, not by `pip`.
 
 Ubuntu/Debian:
 
@@ -229,26 +299,33 @@ Ubuntu/Debian:
 sudo apt install python3-tk
 ```
 
-## `ModuleNotFoundError` for Astropy, Skyfield, Matplotlib, Pandas, or NumPy
-
-Activate the virtual environment and reinstall:
+### Missing Astropy, Skyfield, Matplotlib, Pandas, or NumPy
 
 ```bash
+source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-## First question fails to load
+Windows:
 
-Confirm internet access. If a download was interrupted, remove the cache and retry:
-
-```text
-~/.ioaa_sky_trainer
+```powershell
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-## The activity launcher opens no activities
+### First question fails to load
 
-Confirm that activity files:
+Confirm internet access. If a catalogue download was interrupted, delete the catalogue cache files under `~/.ioaa_sky_trainer` and retry. The same folder also stores the launcher settings; retain it to preserve them.
 
-- are inside `activities/`,
-- are named `activity_*.py`, and
-- export `ACTIVITY_CLASS`.
+---
+
+## Packaged launcher note
+
+This packaged version includes a small convenience change for first-time users:
+
+- Run **`main.py`** directly from PyCharm, VS Code, or another Python IDE.
+- On first launch, `main.py` creates a local `.venv`, installs the packages from `requirements.txt`, and then starts the original application from `app.py`.
+- The first run therefore requires an internet connection for dependency installation and any astronomy data downloads used by the program.
+- The original application launcher code has been preserved in `app.py`.
+
+The existing Windows and macOS/Linux launcher scripts are also included.

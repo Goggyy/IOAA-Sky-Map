@@ -1,0 +1,31 @@
+"""Copy this file to tool_your_tool.py and edit the marked metadata and runner."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from ioaa_trainer.tool_api import SkyTool
+
+
+class ExampleTool(SkyTool):
+    tool_id = "example_tool"
+    title = "Example Tool"
+    description = "Explain what this tool lets the student do."
+
+
+TOOL_CLASS = ExampleTool
+
+
+def run_tool() -> int:
+    # Import and open your Tkinter window here.
+    # Keep this file independently runnable, just like the exercise modules.
+    print("Implement this tool's UI in run_tool().")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_tool())

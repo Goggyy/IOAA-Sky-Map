@@ -17,8 +17,8 @@ from ioaa_trainer.rendering import SkyMapRenderer
 
 class ExampleActivity(SkyActivity):
     activity_id = "example"
-    title = "Example activity"
-    description = "Explain the skill practised by this activity."
+    title = "Example exercise"
+    description = "Explain the skill practised by this exercise."
 
     def create_question(
         self,
@@ -32,6 +32,14 @@ class ExampleActivity(SkyActivity):
             answer_text="A short explanation shown after Reveal answer.",
             payload={"anything": "needed by draw_answer"},
         )
+
+    # Optional: override draw_question() only when students need a marker
+    # before Reveal answer, such as a circle around a target.
+    # def draw_question(self, renderer, model, question) -> None:
+    #     renderer.draw_target_circle(
+    #         question.payload["altitude"],
+    #         question.payload["azimuth"],
+    #     )
 
     def draw_answer(
         self,
