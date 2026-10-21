@@ -534,7 +534,7 @@ class SkyMapRenderer:
         offset_points: tuple[float, float] = (7.0, 7.0),
         zorder: int = 12,
     ) -> None:
-        """Add a horizontal label that does not rotate with the sky map."""
+        """Add a horizontal label clipped to the circular sky-map area."""
         self.axes.annotate(
             text,
             xy=(math.radians(azimuth), 90.0 - altitude),
@@ -547,6 +547,7 @@ class SkyMapRenderer:
             ha="left",
             va="bottom",
             zorder=zorder,
+            clip_on=True,
             bbox={
                 "facecolor": self.BACKGROUND,
                 "edgecolor": "none",
@@ -555,50 +556,79 @@ class SkyMapRenderer:
             },
         )
 
-    def draw_cardinal_labels(self, *, zorder: int = 13) -> None:
-        """Label N, E, S, and W upright at the horizon or chart boundary."""
-        radius = max(1.0, min(90.0, self._sky_radius_degrees) - 2.5)
+    def draw_boundary_label(
+        self,
+        azimuth: float,
+        text: str,
+        *,
+        color: str | None = None,
+        fontsize: float = 9.0,
+        radial_gap_degrees: float = 4.0,
+        zorder: int = 13,
+    ) -> None:
+        """Place an upright label just outside the circular sky-map boundary."""
+        radius = self._sky_radius_degrees + max(1.0, float(radial_gap_degrees))
+        self.axes.text(
+            math.radians(azimuth),
+            radius,
+            text,
+            color=color or self.MUTED,
+            fontsize=fontsize,
+            fontweight="bold",
+            ha="center",
+            va="center",
+            rotation=0,
+            zorder=zorder,
+            clip_on=False,
+        )
+
+    def draw_cardinal_labels(
+        self,
+        *,
+        color: str | None = None,
+        zorder: int = 13,
+    ) -> None:
+        """Label N, E, S, and W just outside the circular sky map."""
+        label_color = color or self.MUTED
         for azimuth, label in ((0.0, "N"), (90.0, "E"), (180.0, "S"), (270.0, "W")):
-            self.axes.text(
-                math.radians(azimuth),
-                radius,
+            self.draw_boundary_label(
+                azimuth,
                 label,
-                color=self.ANSWER,
+                color=label_color,
                 fontsize=10.0,
-                fontweight="bold",
-                ha="center",
-                va="center",
-                rotation=0,
+                radial_gap_degrees=4.0,
                 zorder=zorder,
-                bbox={
-                    "facecolor": self.BACKGROUND,
-                    "edgecolor": "none",
-                    "alpha": 0.82,
-                    "pad": 1.3,
-                },
+            )
+
+    def draw_local_meridian(
+        self,
+        *,
+        color: str | None = None,
+        linewidth: float = 1.8,
+        alpha: float = 0.95,
+        zorder: int = 8,
+    ) -> None:
+        """Draw the north-zenith-south local meridian across the chart."""
+        line_color = color or self.ANSWER
+        radius = np.linspace(0.0, self._sky_radius_degrees, 361)
+        for azimuth in (0.0, 180.0):
+            self.axes.plot(
+                np.full_like(radius, math.radians(azimuth)),
+                radius,
+                color=line_color,
+                linewidth=linewidth,
+                alpha=alpha,
+                zorder=zorder,
             )
 
     def draw_answer_note(self, text: str, *, zorder: int = 14) -> None:
-        """Place a compact upright answer summary inside the chart."""
-        self.axes.text(
-            0.02,
-            0.98,
-            text,
-            transform=self.axes.transAxes,
-            color=self.ANSWER,
-            fontsize=9.0,
-            fontweight="bold",
-            ha="left",
-            va="top",
-            rotation=0,
-            zorder=zorder,
-            bbox={
-                "facecolor": self.BACKGROUND,
-                "edgecolor": self.ANSWER,
-                "alpha": 0.88,
-                "pad": 4.0,
-            },
-        )
+        """Compatibility hook for old exercises; answers now live in the side panel.
+
+        Earlier versions drew red answer summaries in the square corners around the
+        polar chart.  Those notes could sit outside the circular sky map and obscure
+        the interface, so the renderer deliberately no longer paints them.
+        """
+        del text, zorder
 
     def _draw_constellation_edge(
         self,

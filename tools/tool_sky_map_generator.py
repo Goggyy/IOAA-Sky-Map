@@ -13,6 +13,7 @@ from ioaa_trainer.tool_api import SkyTool
 
 class SkyMapGeneratorTool(SkyTool):
     tool_id = "sky_map_generator"
+    sort_order = 1
     title = "Sky Map Generator"
     description = (
         "Generate and analyse a sky using UTC, LST, MJD, or a directly chosen "

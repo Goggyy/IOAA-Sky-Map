@@ -9,5 +9,6 @@ class SkyTool(ABC):
     """Metadata shared by tools discovered automatically by the launcher."""
 
     tool_id = "tool"
+    sort_order = 100
     title = "Sky tool"
     description = ""
