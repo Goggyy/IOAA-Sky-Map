@@ -235,6 +235,8 @@ class VerticalScrolledFrame(ttk.Frame):
 
         self._scroll_target: float | None = None
         self._scroll_animation: str | None = None
+        self._scrollbar_visible = True
+        self.after_idle(self._update_scrollbar_visibility)
 
     def refresh_theme(self) -> None:
         colour = NIGHT_BACKGROUND if night_mode_enabled(self) else _ttk_background(self)
@@ -245,9 +247,27 @@ class VerticalScrolledFrame(ttk.Frame):
 
     def _content_configured(self, _event=None) -> None:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self.after_idle(self._update_scrollbar_visibility)
 
     def _canvas_configured(self, event) -> None:
         self.canvas.itemconfigure(self._window_id, width=event.width)
+        self.after_idle(self._update_scrollbar_visibility)
+
+    def _update_scrollbar_visibility(self) -> None:
+        """Show the scrollbar only when the content is taller than the viewport."""
+        try:
+            bbox = self.canvas.bbox("all")
+            viewport_height = self.canvas.winfo_height()
+        except tk.TclError:
+            return
+        content_height = 0 if bbox is None else max(0, bbox[3] - bbox[1])
+        needs_scrollbar = content_height > viewport_height + 1
+        if needs_scrollbar and not self._scrollbar_visible:
+            self.scrollbar.grid()
+            self._scrollbar_visible = True
+        elif not needs_scrollbar and self._scrollbar_visible:
+            self.scrollbar.grid_remove()
+            self._scrollbar_visible = False
 
     def _scrollbar_command(self, *args) -> None:
         self._cancel_scroll_animation()

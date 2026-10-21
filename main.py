@@ -97,7 +97,12 @@ def discover_tools() -> list[DiscoveredTool]:
                 file_path=file_path,
             )
         )
-    tools.sort(key=lambda item: item.instance.title)
+    tools.sort(
+        key=lambda item: (
+            getattr(item.instance, "sort_order", 100),
+            item.instance.title.lower(),
+        )
+    )
     return tools
 
 
@@ -113,7 +118,7 @@ class Launcher(tk.Tk):
         self._loaded_settings = load_generation_settings()
         self.title("IOAA Blind Sky Trainer")
         self.geometry("820x900")
-        self.minsize(650, 680)
+        self.minsize(620, 500)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self._build_variables()
@@ -236,12 +241,17 @@ class Launcher(tk.Tk):
             justify="left",
         ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
-        exercise_frame = ttk.LabelFrame(tab, text="Available exercises", padding=12)
+        exercise_frame = ttk.LabelFrame(tab, text="Available exercises", padding=8)
         exercise_frame.grid(row=1, column=0, sticky="nsew")
         exercise_frame.columnconfigure(0, weight=1)
+        exercise_frame.rowconfigure(0, weight=1)
+        exercise_scroller = VerticalScrolledFrame(exercise_frame, padding=4)
+        exercise_scroller.grid(row=0, column=0, sticky="nsew")
+        exercise_list = exercise_scroller.content
+        exercise_list.columnconfigure(0, weight=1)
 
         if not self.activities:
-            ttk.Label(exercise_frame, text="No exercise modules were found.").grid(
+            ttk.Label(exercise_list, text="No exercise modules were found.").grid(
                 row=0,
                 column=0,
                 sticky="w",
@@ -250,7 +260,7 @@ class Launcher(tk.Tk):
 
         for row, discovered in enumerate(self.activities):
             exercise = discovered.instance
-            item = ttk.Frame(exercise_frame)
+            item = ttk.Frame(exercise_list)
             item.grid(row=row, column=0, sticky="ew", pady=(0 if row == 0 else 10, 0))
             item.columnconfigure(0, weight=1)
             ttk.Label(
@@ -292,12 +302,17 @@ class Launcher(tk.Tk):
             justify="left",
         ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
-        tool_frame = ttk.LabelFrame(tab, text="Available tools", padding=12)
+        tool_frame = ttk.LabelFrame(tab, text="Available tools", padding=8)
         tool_frame.grid(row=1, column=0, sticky="nsew")
         tool_frame.columnconfigure(0, weight=1)
+        tool_frame.rowconfigure(0, weight=1)
+        tool_scroller = VerticalScrolledFrame(tool_frame, padding=4)
+        tool_scroller.grid(row=0, column=0, sticky="nsew")
+        tool_list = tool_scroller.content
+        tool_list.columnconfigure(0, weight=1)
 
         if not self.tools:
-            ttk.Label(tool_frame, text="No tool modules were found.").grid(
+            ttk.Label(tool_list, text="No tool modules were found.").grid(
                 row=0,
                 column=0,
                 sticky="w",
@@ -306,7 +321,7 @@ class Launcher(tk.Tk):
 
         for row, discovered in enumerate(self.tools):
             tool = discovered.instance
-            item = ttk.Frame(tool_frame)
+            item = ttk.Frame(tool_list)
             item.grid(row=row, column=0, sticky="ew", pady=(0 if row == 0 else 10, 0))
             item.columnconfigure(0, weight=1)
             ttk.Label(

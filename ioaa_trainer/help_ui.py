@@ -27,6 +27,8 @@ Excersices:
 4. Locate a Zodiacal Constellation — locate one of the 13 zodiacal constellations, including Ophiuchus.
 5. Name the Constellation — identify a randomly circled constellation above the horizon.
 6. Name the Star — identify a circled bright star by its IAU name and Bayer designation.
+7. Star from Alt/Az — identify one of the 20 brightest stars from a supplied Alt/Az coordinate; cardinal directions are shown.
+8. Estimate the LST — use a drawn local meridian and familiar RA references to estimate local sidereal time.
 
 A timer begins when a new sky map displays and stops when Reveal answer is selected. It is used as a reference for the user and to simulate exam conditions.
 
@@ -35,7 +37,7 @@ Navigating the app:
 The launcher contains three tabs:
 
 - Exercises — the default main page containing all training exercises.
-- Tools — independently runnable astronomy tools.
+- Tools — independently runnable astronomy tools. Tool 1 is the Sky Map Generator; Tool 2 is the Coordinate Converter for RA/Dec, Alt/Az, LST, and hour angle. The Coordinate Converter includes a live, draggable celestial sphere beneath each workflow, showing the P–Z–★ astronomical triangle, equator, horizon, meridian, N/E/S/W directions, and coordinate arcs. The default/reset orientation is observer-centred Alt–Az (zenith up and east right), and drag rotation stays screen-relative after tilting.
 - Random sky settings — settings for the random sky maps generated in the sky map. All customisation to sky settings will be saved locally.
 
 """

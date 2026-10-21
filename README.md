@@ -16,6 +16,8 @@ Below are further specifications about the program:
 4. **Locate a Zodiacal Constellation** — locate one of the 13 constellations zodiacal constellations, including Ophiuchus.
 5. **Name the Constellation** — identify a randomly circled constellation above the horizon
 6. **Name the Star** — identify a circled bright star by its IAU name and Bayer designation.
+7. **Star from Alt/Az** — use a supplied altitude/azimuth coordinate and cardinal directions to identify one of the 20 brightest stars by IAU name and Bayer designation.
+8. **Estimate the LST** — estimate local sidereal time from a sky map with the local meridian drawn in; the solution gives the actual LST and 1–3 nearby bright RA references.
 
 A timer begins when a new sky map displays and stops when **Reveal answer** is selected, just used for the user as a reference and simulate exam conditions.
 
@@ -45,9 +47,12 @@ ioaa_sky_trainer/
 │   ├── activity_zodiac_constellation.py
 │   ├── activity_name_constellation.py
 │   ├── activity_name_star.py
+│   ├── activity_altaz_star.py
+│   ├── activity_estimate_lst.py
 │   └── activity_template.py.example
 ├── tools/
 │   ├── tool_sky_map_generator.py
+│   ├── tool_coordinate_converter.py
 │   └── tool_template.py.example
 └── ioaa_trainer/
     ├── activity_api.py                # Legacy API names retained for compatibility
@@ -195,7 +200,7 @@ Select **Save settings**. Newly launched exercise windows use the saved values. 
 3. Select **Reveal answer** to stop the timer and display the answer.
 4. Select **New random question** or **Analyse current sky…**.
 
-The blind map hides ordinary coordinates, grids, constellation labels, location, and time. Exercises 5 and 6 retain their target circles. The chart is north-up unless random map rotation is enabled in Random sky settings. Exercise 1 reveals its requested cardinal-direction and pole labels only after the answer is revealed.
+The blind map hides ordinary coordinates, grids, constellation labels, location, and time. Exercises 5 and 6 retain their target circles. Exercise 7 shows cardinal directions so the supplied Alt/Az coordinate can be interpreted, and Exercise 8 shows the local meridian. The chart is north-up unless random map rotation is enabled in Random sky settings. Exercise 1 reveals its requested cardinal-direction and pole labels only after the answer is revealed.
 
 ## Analysis window
 
@@ -237,6 +242,19 @@ The generator provides two ways to place the sky:
 - **Direct zenith** — drag a marker on an equirectangular celestial-sphere projection to place the right ascension and declination at the centre of the chart. For precise placement, enter RA as decimal hours or `HH:MM:SS` and Dec as decimal degrees in the manual controls below the projection. The highlighted spherical-cap boundary shows the area included by the current field-of-view setting. The declination becomes the synthetic observer latitude and the RA becomes LST for the selected reference date.
 
 The generator recalculates automatically after observation inputs settle; there is no separate Generate button. In direct-zenith mode the chart keeps recalculating while the zenith marker is dragged. The **View** tab controls colour inversion, distance from zenith (0°–180°), faintest visible magnitude, star-marker scale, and optional map rotation. Rotation is disabled by default, giving a north-up map. At 90° the chart is one visible hemisphere; at 180° it is a full-sky zenithal-equidistant projection with the nadir at the outer edge. Because the full sphere is calculated internally, coverage, layer, colour, magnitude, marker-size, and rotation changes redraw immediately. The generator also retains study-view, navigation, and PNG-export controls.
+
+### Coordinate Converter
+
+Open **Coordinate Converter** from the Tools tab. It is Tool 2 and uses two guided workflows instead of one all-editable worksheet:
+
+- **RA / Dec → Alt / Az** — enter observer latitude, RA, Dec, and either LST (the usual case) or hour angle. The tool calculates the remaining sidereal quantity, altitude, and azimuth.
+- **Alt / Az → RA / Dec** — enter observer latitude, altitude, and azimuth. Declination and hour angle are determined immediately. Optionally provide either LST or RA as a time anchor to calculate the other quantity.
+
+Given values are kept visually separate from calculated results, and values carry across when switching direction so a conversion can be checked in reverse. A **Copy values** button copies all populated quantities.
+
+Below each conversion workflow is an **interactive celestial sphere** showing the standard astronomical triangle **P–Z–★**: the north celestial pole (P), zenith (Z), and selected object (★). The triangle updates live with the converter values and labels the spherical sides `PZ = 90° − φ`, `P★ = 90° − δ`, and `Z★ = 90° − h`, together with hour angle, declination, altitude, and azimuth construction arcs. The sphere also shows the celestial equator, local horizon, meridian, and N/E/S/W horizon directions. Its default/reset view is **observer-centred Alt–Az**: zenith stays up, east is to the right, and changing observer latitude moves the equatorial grid rather than the local horizon. Dragging uses screen-relative rotation, so left/right and up/down remain consistent after the sphere has been tilted. Use the mouse wheel to zoom or select **Reset view** to return to the Alt–Az orientation. Hidden/back-side arcs are dashed to make the 3D geometry easier to read, and the graphic follows the application night-mode palette.
+
+RA, LST, and hour angle accept decimal hours or sexagesimal `HH:MM:SS`; angular fields accept decimal degrees or sexagesimal `DD:MM:SS`. Hour angle follows `H = LST - RA` and is positive west of the meridian. Azimuth uses the same convention as the sky maps: north = 0°, east = 90°, south = 180°, west = 270°.
 
 ### Adding a new tool
 
@@ -329,3 +347,10 @@ This packaged version includes a small convenience change for first-time users:
 - The original application launcher code has been preserved in `app.py`.
 
 The existing Windows and macOS/Linux launcher scripts are also included.
+
+
+### Interface notes
+
+- Exercise and tool lists scroll automatically when the available window height is too small; the scrollbar stays hidden when all entries fit.
+- Exercise-specific direction and meridian labels are placed outside the circular sky map so they do not cover stars.
+- Revealed answers use the left answer panel plus in-map markings; the old red answer-summary boxes outside the circular map are no longer drawn.
