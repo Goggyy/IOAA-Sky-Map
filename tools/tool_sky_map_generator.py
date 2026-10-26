@@ -24,6 +24,13 @@ class SkyMapGeneratorTool(SkyTool):
 TOOL_CLASS = SkyMapGeneratorTool
 
 
+def create_widget():
+    """Create the embeddable tool view used by the main launcher."""
+    from ioaa_trainer.generator_ui import SkyMapGeneratorApplication
+
+    return SkyMapGeneratorApplication()
+
+
 def run_tool() -> int:
     # Import lazily so the launcher can discover tool metadata without loading
     # the astronomy and Matplotlib stack until the user opens the tool.

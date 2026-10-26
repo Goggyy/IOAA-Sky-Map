@@ -1,280 +1,169 @@
-"""Full-featured analysis window for the current random sky."""
+"""Full-featured PyQt6 sky-analysis view for the current exercise sky."""
 
 from __future__ import annotations
 
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
 from zoneinfo import ZoneInfo
+from typing import Callable
 
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+    QPushButton, QScrollArea, QSlider, QSizePolicy, QVBoxLayout, QWidget,
+)
 
 from .activity_api import SkyActivity
 from .astronomy import format_local_sidereal_time
 from .models import QuestionBundle
 from .rendering import RenderOptions, SkyMapRenderer
 from .theme import apply_night_theme, night_mode_enabled
-from .widgets import ToggleSwitch
+from .widgets import BooleanVar, ToggleSwitch
 
 
-class AnalysisWindow(tk.Toplevel):
+class AnalysisWindow(QWidget):
     """Inspect the current question with independently toggleable layers."""
 
     def __init__(
         self,
-        parent: tk.Misc,
+        parent: QWidget | None,
         bundle: QuestionBundle,
         activity: SkyActivity,
+        *,
+        back_callback: Callable[[], None] | None = None,
+        night_mode: bool | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.bundle = bundle
         self.activity = activity
-        self.night_mode = night_mode_enabled(parent)
-        apply_night_theme(self, self.night_mode)
-        self.title(f"Analyse current sky — {activity.title}")
-        self.geometry("1240x820")
-        self.minsize(960, 680)
-
+        self._back_callback = back_callback
+        self.night_mode = night_mode_enabled(parent) if night_mode is None else bool(night_mode)
+        self.setWindowTitle(f"Analysis — {activity.title}")
+        self.resize(1280, 820)
+        self.setMinimumSize(920, 620)
         self._build_variables()
         self._build_ui()
+        apply_night_theme(self, self.night_mode)
         self._redraw()
 
     def _build_variables(self) -> None:
-        # The analysis page starts with the same clean star-only chart as the
-        # exercise. Students can then add one reference layer at a time.
-        self.direction_labels_var = tk.BooleanVar(value=False)
-        self.altitude_grid_var = tk.BooleanVar(value=False)
-        self.coordinate_grid_var = tk.BooleanVar(value=False)
-        self.ecliptic_var = tk.BooleanVar(value=False)
-        self.celestial_equator_var = tk.BooleanVar(value=False)
-        self.galactic_equator_var = tk.BooleanVar(value=False)
-        self.constellation_lines_var = tk.BooleanVar(value=False)
-        self.constellation_names_var = tk.BooleanVar(value=False)
-        self.star_names_var = tk.BooleanVar(value=False)
-        self.answer_var = tk.BooleanVar(value=False)
-        self.solar_system_objects_var = tk.BooleanVar(value=False)
-        self.solar_system_labels_var = tk.BooleanVar(value=False)
-        self.zenith_label_var = tk.BooleanVar(value=False)
-        self.title_var = tk.BooleanVar(value=False)
-        self.magnitude_var = tk.DoubleVar(
-            value=self.bundle.model.settings.limiting_magnitude
-        )
-        self.magnitude_value_var = tk.StringVar(
-            value=f"{self.magnitude_var.get():.1f}"
-        )
-        self.status_var = tk.StringVar(
-            value="All overlays start off. Add layers or adjust the stellar magnitude limit."
-        )
+        settings = self.bundle.model.settings
+        self.layer_vars = {
+            "direction": BooleanVar(False), "altgrid": BooleanVar(False), "coordgrid": BooleanVar(False),
+            "ecliptic": BooleanVar(False), "equator": BooleanVar(False), "galactic": BooleanVar(False),
+            "const_lines": BooleanVar(False), "const_names": BooleanVar(False), "star_names": BooleanVar(False),
+            "answer": BooleanVar(False),
+            "solar": BooleanVar(settings.include_solar_system_objects),
+            "solar_labels": BooleanVar(False),
+            "zenith": BooleanVar(False), "title": BooleanVar(False),
+        }
+        self.magnitude = settings.limiting_magnitude
 
     def _build_ui(self) -> None:
-        self.columnconfigure(1, weight=1)
-        self.rowconfigure(0, weight=1)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
 
-        controls = ttk.Frame(self, padding=12)
-        controls.grid(row=0, column=0, sticky="nsew")
-        controls.columnconfigure(0, weight=1)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame); scroll.setFixedWidth(285)
+        controls = QWidget(); scroll.setWidget(controls)
+        cl = QVBoxLayout(controls); cl.setContentsMargins(2,2,8,2); cl.setSpacing(10)
 
-        prompt_frame = ttk.LabelFrame(controls, text="Question", padding=10)
-        prompt_frame.grid(row=0, column=0, sticky="ew")
-        ttk.Label(
-            prompt_frame,
-            text=self.bundle.question.prompt,
-            wraplength=285,
-            justify="left",
-            font=("TkDefaultFont", 10, "bold"),
-        ).grid(row=0, column=0, sticky="ew")
-        ttk.Label(
-            prompt_frame,
-            text=self.bundle.question.answer_text,
-            wraplength=285,
-            justify="left",
-        ).grid(row=1, column=0, sticky="ew", pady=(7, 0))
+        heading = QLabel("Analysis"); heading.setObjectName("PageTitle"); cl.addWidget(heading)
+        prompt = QGroupBox("Question")
+        pl = QVBoxLayout(prompt)
+        p = QLabel(self.bundle.question.prompt); p.setWordWrap(True); p.setObjectName("QuestionText"); pl.addWidget(p)
+        cl.addWidget(prompt)
 
-        layers = ttk.LabelFrame(controls, text="Visible layers", padding=10)
-        layers.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        answer = QGroupBox("Answer")
+        al = QVBoxLayout(answer)
+        a = QLabel(self.bundle.question.answer_text); a.setWordWrap(True); al.addWidget(a)
+        cl.addWidget(answer)
 
-        layer_variables = [
-            ("Horizon directions", self.direction_labels_var),
-            ("Altitude/azimuth grid", self.altitude_grid_var),
-            ("RA/Dec coordinate grid", self.coordinate_grid_var),
-            ("Ecliptic", self.ecliptic_var),
-            ("Celestial equator", self.celestial_equator_var),
-            ("Galactic equator", self.galactic_equator_var),
-            ("All constellation diagrams", self.constellation_lines_var),
-            ("Constellation names", self.constellation_names_var),
-            ("Bright-star names", self.star_names_var),
-            ("Solar system objects", self.solar_system_objects_var),
-            ("Solar system object names", self.solar_system_labels_var),
-            ("Zenith label", self.zenith_label_var),
-            ("Exercise answer highlight", self.answer_var),
-            ("Observation details title", self.title_var),
+        layers = QGroupBox("Layers"); ll = QVBoxLayout(layers); ll.setSpacing(5)
+        items = [
+            ("Directions", "direction"), ("Alt/Az grid", "altgrid"),
+            ("RA/Dec grid", "coordgrid"), ("Ecliptic", "ecliptic"),
+            ("Celestial equator", "equator"), ("Galactic equator", "galactic"),
+            ("Constellations", "const_lines"), ("Constellation names", "const_names"),
+            ("Star names", "star_names"), ("Solar system", "solar"),
+            ("Solar labels", "solar_labels"), ("Zenith", "zenith"),
+            ("Answer", "answer"), ("Details", "title"),
         ]
-        for row, (label, variable) in enumerate(layer_variables):
-            ToggleSwitch(
-                layers,
-                text=label,
-                variable=variable,
-                command=self._redraw,
-            ).grid(row=row, column=0, sticky="w", pady=1)
+        for label, key in items:
+            ll.addWidget(ToggleSwitch(text=label, variable=self.layer_vars[key], command=self._redraw))
+        cl.addWidget(layers)
 
-        stars = ttk.LabelFrame(controls, text="Star visibility", padding=10)
-        stars.grid(row=2, column=0, sticky="ew", pady=(12, 0))
-        stars.columnconfigure(0, weight=1)
+        stars = QGroupBox("Stars"); sl = QVBoxLayout(stars)
+        row = QHBoxLayout(); row.addWidget(QLabel("Magnitude limit")); row.addStretch(1)
+        self.mag_value = QLabel(f"{self.magnitude:.1f}"); self.mag_value.setObjectName("Muted"); row.addWidget(self.mag_value); sl.addLayout(row)
+        self.mag_slider = QSlider(Qt.Orientation.Horizontal); self.mag_slider.setRange(-15, round(self.bundle.model.settings.limiting_magnitude*10)); self.mag_slider.setValue(round(self.magnitude*10)); self.mag_slider.valueChanged.connect(self._magnitude_changed); sl.addWidget(self.mag_slider)
+        cl.addWidget(stars)
 
-        magnitude_header = ttk.Frame(stars)
-        magnitude_header.grid(row=0, column=0, sticky="ew")
-        magnitude_header.columnconfigure(0, weight=1)
-        ttk.Label(magnitude_header, text="Faintest visible magnitude").grid(
-            row=0,
-            column=0,
-            sticky="w",
+        metadata = QGroupBox("Revealed sky"); ml = QVBoxLayout(metadata)
+        settings = self.bundle.model.settings; utc = settings.observation_datetime.astimezone(ZoneInfo("UTC"))
+        text = (
+            f"Latitude: {settings.latitude:.5f}°\nLongitude: {settings.longitude:.5f}°\n"
+            f"UTC: {utc:%Y-%m-%d %H:%M:%S}\nLST: {format_local_sidereal_time(settings)}\n"
+            f"Rotation: {settings.map_rotation_degrees:.1f}°\nSeed: {self.bundle.seed}"
         )
-        ttk.Label(
-            magnitude_header,
-            textvariable=self.magnitude_value_var,
-            width=4,
-            anchor="e",
-        ).grid(row=0, column=1, sticky="e")
+        ml.addWidget(QLabel(text)); cl.addWidget(metadata)
 
-        self.magnitude_scale = ttk.Scale(
-            stars,
-            from_=-1.5,
-            to=self.bundle.model.settings.limiting_magnitude,
-            variable=self.magnitude_var,
-            command=self._magnitude_changed,
-        )
-        self.magnitude_scale.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        ttk.Label(
-            stars,
-            text="Lower values show only brighter stars; higher values include fainter stars.",
-            wraplength=275,
-            justify="left",
-        ).grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        buttons = QHBoxLayout()
+        save = QPushButton("Save PNG…")
+        save.clicked.connect(self._save_png)
+        buttons.addWidget(save)
+        if self._back_callback is None:
+            close = QPushButton("Close")
+            close.clicked.connect(self.close)
+            buttons.addWidget(close)
+        buttons.addStretch(1)
+        cl.addLayout(buttons)
+        self.status = QLabel(""); self.status.setObjectName("Status"); self.status.setWordWrap(True); self.status.setVisible(False); cl.addWidget(self.status)
+        cl.addStretch(1)
+        root.addWidget(scroll)
 
-        metadata = ttk.LabelFrame(controls, text="Revealed sky", padding=10)
-        metadata.grid(row=3, column=0, sticky="ew", pady=(12, 0))
-        settings = self.bundle.model.settings
-        utc_time = settings.observation_datetime.astimezone(ZoneInfo("UTC"))
-        metadata_text = (
-            f"Latitude: {settings.latitude:.5f}°\n"
-            f"Longitude: {settings.longitude:.5f}°\n"
-            f"Time: {utc_time:%Y-%m-%d %H:%M:%S} UTC\n"
-            f"LST: {format_local_sidereal_time(settings)}\n"
-            f"Map rotation: {settings.map_rotation_degrees:.1f}°\n"
-            f"Solar-system data: "
-            f"{'included' if settings.include_solar_system_objects else 'not included'}\n"
-            f"Question seed: {self.bundle.seed}"
-        )
-        ttk.Label(
-            metadata,
-            text=metadata_text,
-            justify="left",
-        ).grid(row=0, column=0, sticky="ew")
-
-        actions = ttk.Frame(controls)
-        actions.grid(row=4, column=0, sticky="ew", pady=(12, 0))
-        actions.columnconfigure((0, 1), weight=1)
-        ttk.Button(actions, text="Save PNG…", command=self._save_png).grid(
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=(0, 4),
-        )
-        ttk.Button(actions, text="Close", command=self.destroy).grid(
-            row=0,
-            column=1,
-            sticky="ew",
-            padx=(4, 0),
-        )
-
-        ttk.Label(
-            controls,
-            textvariable=self.status_var,
-            wraplength=285,
-            justify="left",
-        ).grid(row=5, column=0, sticky="ew", pady=(12, 0))
-
-        chart_frame = ttk.Frame(self, padding=(0, 8, 8, 8))
-        chart_frame.grid(row=0, column=1, sticky="nsew")
-        chart_frame.columnconfigure(0, weight=1)
-        chart_frame.rowconfigure(0, weight=1)
-
+        chart_card = QFrame(); chart_card.setObjectName("Card"); chart_layout = QVBoxLayout(chart_card); chart_layout.setContentsMargins(8,8,8,8); chart_layout.setSpacing(4)
         self.figure = Figure(figsize=(8.5, 7.5), dpi=100)
-        self.renderer = SkyMapRenderer(self.figure)
-        self.renderer.set_night_mode(self.night_mode)
-        self.canvas = FigureCanvasTkAgg(self.figure, master=chart_frame)
-        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
-
-        toolbar_frame = ttk.Frame(chart_frame)
-        toolbar_frame.grid(row=1, column=0, sticky="ew")
-        toolbar = NavigationToolbar2Tk(self.canvas, toolbar_frame, pack_toolbar=False)
-        toolbar.update()
-        toolbar.pack(side="left")
+        self.renderer = SkyMapRenderer(self.figure); self.renderer.set_night_mode(self.night_mode)
+        self.canvas = FigureCanvasQTAgg(self.figure); self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        chart_layout.addWidget(self.canvas, 1)
+        toolbar = NavigationToolbar2QT(self.canvas, self)
+        if self.night_mode:
+            toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        chart_layout.addWidget(toolbar)
+        root.addWidget(chart_card, 1)
 
     def _render_options(self) -> RenderOptions:
+        v = self.layer_vars
         return RenderOptions(
-            show_direction_labels=self.direction_labels_var.get(),
-            show_altitude_grid=self.altitude_grid_var.get(),
-            show_title=self.title_var.get(),
-            show_ecliptic=self.ecliptic_var.get(),
-            show_celestial_equator=self.celestial_equator_var.get(),
-            show_galactic_equator=self.galactic_equator_var.get(),
-            show_constellation_names=self.constellation_names_var.get(),
-            show_constellation_lines=self.constellation_lines_var.get(),
-            show_star_names=self.star_names_var.get(),
-            show_coordinate_grid=self.coordinate_grid_var.get(),
-            show_solar_system_objects=self.solar_system_objects_var.get(),
-            show_solar_system_labels=self.solar_system_labels_var.get(),
-            show_zenith_label=self.zenith_label_var.get(),
-            limiting_magnitude=self.magnitude_var.get(),
+            show_direction_labels=v["direction"].get(), show_altitude_grid=v["altgrid"].get(),
+            show_title=v["title"].get(), show_ecliptic=v["ecliptic"].get(),
+            show_celestial_equator=v["equator"].get(), show_galactic_equator=v["galactic"].get(),
+            show_constellation_names=v["const_names"].get(), show_constellation_lines=v["const_lines"].get(),
+            show_star_names=v["star_names"].get(), show_coordinate_grid=v["coordgrid"].get(),
+            show_solar_system_objects=v["solar"].get(), show_solar_system_labels=v["solar_labels"].get(),
+            show_zenith_label=v["zenith"].get(), limiting_magnitude=self.magnitude,
         )
 
-    def _magnitude_changed(self, value: str) -> None:
-        """Update the readout and redraw while the scale is being moved."""
-        try:
-            magnitude = float(value)
-        except (TypeError, ValueError):
-            magnitude = self.magnitude_var.get()
-        self.magnitude_value_var.set(f"{magnitude:.1f}")
-        if hasattr(self, "renderer") and hasattr(self, "canvas"):
-            self._redraw()
+    def _magnitude_changed(self, value: int) -> None:
+        self.magnitude = value / 10.0; self.mag_value.setText(f"{self.magnitude:.1f}"); self._redraw()
 
     def _redraw(self) -> None:
+        if not hasattr(self, "renderer"): return
         def overlay(renderer: SkyMapRenderer, model) -> None:
-            self.activity.draw_question(
-                renderer,
-                model,
-                self.bundle.question,
-            )
-            if self.answer_var.get():
-                self.activity.draw_answer(
-                    renderer,
-                    model,
-                    self.bundle.question,
-                )
-
-        self.renderer.draw(self.bundle.model, self._render_options(), overlay)
+            if self.layer_vars["answer"].get(): self.activity.draw_answer(renderer, model, self.bundle.question)
+        self.renderer.draw(self.bundle.model, self._render_options(), answer_overlay=overlay)
         self.canvas.draw_idle()
 
     def _save_png(self) -> None:
-        initial_name = f"ioaa_analysis_{self.bundle.seed}.png"
-        filename = filedialog.asksaveasfilename(
-            parent=self,
-            title="Save sky analysis",
-            defaultextension=".png",
-            initialfile=initial_name,
-            filetypes=[("PNG image", "*.png"), ("All files", "*.*")],
-        )
-        if not filename:
-            return
+        utc = self.bundle.model.settings.observation_datetime.astimezone(ZoneInfo("UTC"))
+        filename, _ = QFileDialog.getSaveFileName(self, "Save analysed sky map", f"sky_analysis_{utc:%Y%m%d_%H%M%S}.png", "PNG image (*.png);;All files (*)")
+        if not filename: return
+        if not filename.lower().endswith(".png"): filename += ".png"
         try:
-            self.figure.savefig(
-                filename,
-                dpi=220,
-                bbox_inches="tight",
-                facecolor=self.figure.get_facecolor(),
-            )
+            self.figure.savefig(filename, dpi=220, bbox_inches="tight", facecolor=self.figure.get_facecolor())
+            self.status.setText(f"Saved {filename}")
+            self.status.setVisible(True)
         except OSError as error:
-            messagebox.showerror("Could not save image", str(error), parent=self)
-            return
-        self.status_var.set(f"Saved {filename}")
+            QMessageBox.critical(self, "Could not save image", str(error))

@@ -24,6 +24,13 @@ class CoordinateConverterTool(SkyTool):
 TOOL_CLASS = CoordinateConverterTool
 
 
+def create_widget():
+    """Create the embeddable tool view used by the main launcher."""
+    from ioaa_trainer.coordinate_converter_ui import CoordinateConverterApplication
+
+    return CoordinateConverterApplication()
+
+
 def run_tool() -> int:
     from ioaa_trainer.coordinate_converter_ui import run_coordinate_converter
 

@@ -1,39 +1,52 @@
-"""Launcher, random-sky settings, exercises, and tools for the IOAA sky trainer."""
+"""Main navigation, exercise settings, exercises, and tools for the IOAA sky trainer."""
 
 from __future__ import annotations
 
 import argparse
 import importlib
-import subprocess
 import sys
-import tkinter as tk
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from tkinter import messagebox, ttk
 from types import ModuleType
 from typing import Type
 
-from ioaa_trainer.activity_api import SkyActivity
-from ioaa_trainer.generation_settings import (
-    GenerationSettings,
-    load_generation_settings,
-    save_generation_settings,
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from ioaa_trainer.help_ui import HelpWindow
+
+from ioaa_trainer.activity_api import SkyActivity
+from ioaa_trainer.generation_settings import GenerationSettings, load_generation_settings, save_generation_settings
+from ioaa_trainer.help_ui import HelpPage
 from ioaa_trainer.tool_api import SkyTool
 from ioaa_trainer.theme import apply_night_theme
-from ioaa_trainer.widgets import ToggleSwitch, VerticalScrolledFrame
+from ioaa_trainer.widgets import BooleanVar, SegmentedControl, ToggleSwitch
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 ACTIVITIES_DIRECTORY = PROJECT_ROOT / "activities"
 TOOLS_DIRECTORY = PROJECT_ROOT / "tools"
 
 TIME_MODE_LABELS = {
-    "random": "Random UTC date and time",
-    "fixed_utc": "Fixed UTC date and time",
-    "fixed_lst": "Fixed local sidereal time (LST)",
-    "fixed_mjd": "Fixed Modified Julian Date (MJD)",
+    "random": "Random",
+    "fixed_utc": "UTC",
+    "fixed_lst": "LST + date",
+    "fixed_mjd": "MJD",
 }
 TIME_MODE_VALUES = {label: value for value, label in TIME_MODE_LABELS.items()}
 
@@ -52,21 +65,10 @@ class DiscoveredActivity:
 def discover_activities() -> list[DiscoveredActivity]:
     activities: list[DiscoveredActivity] = []
     for file_path in sorted(ACTIVITIES_DIRECTORY.glob("activity_*.py")):
-        module_name = f"activities.{file_path.stem}"
-        module = importlib.import_module(module_name)
+        module = importlib.import_module(f"activities.{file_path.stem}")
         activity_class = getattr(module, "ACTIVITY_CLASS", None)
-        if (
-            not isinstance(activity_class, type)
-            or not issubclass(activity_class, SkyActivity)
-        ):
-            continue
-        activities.append(
-            DiscoveredActivity(
-                module=module,
-                activity_class=activity_class,
-                file_path=file_path,
-            )
-        )
+        if isinstance(activity_class, type) and issubclass(activity_class, SkyActivity):
+            activities.append(DiscoveredActivity(module, activity_class, file_path))
     activities.sort(key=lambda item: item.instance.title)
     return activities
 
@@ -85,660 +87,459 @@ class DiscoveredTool:
 def discover_tools() -> list[DiscoveredTool]:
     tools: list[DiscoveredTool] = []
     for file_path in sorted(TOOLS_DIRECTORY.glob("tool_*.py")):
-        module_name = f"tools.{file_path.stem}"
-        module = importlib.import_module(module_name)
+        module = importlib.import_module(f"tools.{file_path.stem}")
         tool_class = getattr(module, "TOOL_CLASS", None)
-        if not isinstance(tool_class, type) or not issubclass(tool_class, SkyTool):
-            continue
-        tools.append(
-            DiscoveredTool(
-                module=module,
-                tool_class=tool_class,
-                file_path=file_path,
-            )
-        )
-    tools.sort(
-        key=lambda item: (
-            getattr(item.instance, "sort_order", 100),
-            item.instance.title.lower(),
-        )
-    )
+        if isinstance(tool_class, type) and issubclass(tool_class, SkyTool):
+            tools.append(DiscoveredTool(module, tool_class, file_path))
+    tools.sort(key=lambda item: (getattr(item.instance, "sort_order", 100), item.instance.title.lower()))
     return tools
 
 
-class Launcher(tk.Tk):
-    def __init__(
-        self,
-        activities: list[DiscoveredActivity],
-        tools: list[DiscoveredTool],
-    ) -> None:
+def _label(text: str, *, muted: bool = False, wrap: bool = True) -> QLabel:
+    label = QLabel(text)
+    label.setWordWrap(wrap)
+    if muted:
+        label.setObjectName("Muted")
+    return label
+
+
+def _card() -> tuple[QFrame, QVBoxLayout]:
+    frame = QFrame()
+    frame.setObjectName("Card")
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(16, 14, 16, 14)
+    layout.setSpacing(7)
+    return frame, layout
+
+
+class Launcher(QMainWindow):
+    """Focused Qt launcher for exercises, tools, and shared settings."""
+
+    def __init__(self, activities: list[DiscoveredActivity], tools: list[DiscoveredTool]) -> None:
         super().__init__()
         self.activities = activities
         self.tools = tools
         self._loaded_settings = load_generation_settings()
-        self.title("IOAA Blind Sky Trainer")
-        self.geometry("820x900")
-        self.minsize(620, 500)
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1)
-        self._build_variables()
-        apply_night_theme(self, self.night_mode_var.get())
+        self._current_root_index = 0
+        self._detail_stack: list[tuple[QWidget, str]] = []
+        self.setWindowTitle("Sky Map Trainer")
+        self.resize(1040, 760)
+        self.setMinimumSize(760, 560)
         self._build_ui()
+        self._load_settings_into_ui(self._loaded_settings)
+        apply_night_theme(self, self.night_switch.isChecked())
         self._update_constraint_states()
-
-    def _build_variables(self) -> None:
-        settings = self._loaded_settings
-        fixed_time = settings.fixed_datetime()
-        self.include_solar_var = tk.BooleanVar(
-            value=settings.include_solar_system_objects
-        )
-        self.coordinate_mode_var = tk.StringVar(value=settings.coordinate_mode)
-        self.latitude_var = tk.StringVar(value=f"{settings.fixed_latitude:.6f}")
-        self.longitude_var = tk.StringVar(value=f"{settings.fixed_longitude:.6f}")
-        self.time_mode_var = tk.StringVar(value=settings.time_mode)
-        self.time_mode_display_var = tk.StringVar(
-            value=TIME_MODE_LABELS.get(settings.time_mode, TIME_MODE_LABELS["random"])
-        )
-        self.fixed_date_var = tk.StringVar(value=f"{fixed_time:%Y-%m-%d}")
-        self.fixed_time_var = tk.StringVar(value=f"{fixed_time:%H:%M:%S}")
-        self.fixed_lst_date_var = tk.StringVar(value=settings.fixed_lst_date)
-        self.fixed_lst_time_var = tk.StringVar(value=settings.fixed_lst_time)
-        self.fixed_mjd_var = tk.StringVar(value=f"{float(settings.fixed_mjd):.6f}")
-
-        self.inverted_colors_var = tk.BooleanVar(value=settings.inverted_colors)
-        self.night_mode_var = tk.BooleanVar(value=settings.night_mode)
-        self.enable_map_rotation_var = tk.BooleanVar(value=settings.enable_map_rotation)
-        self.sky_radius_var = tk.DoubleVar(value=settings.sky_radius_degrees)
-        self.sky_radius_value_var = tk.StringVar()
-        self.faintest_magnitude_var = tk.DoubleVar(
-            value=settings.faintest_visible_magnitude
-        )
-        self.faintest_magnitude_value_var = tk.StringVar()
-        self.star_marker_scale_var = tk.DoubleVar(value=settings.star_marker_scale)
-        self.star_marker_scale_value_var = tk.StringVar()
-        self._update_view_readouts()
-
-        self.settings_status_var = tk.StringVar(
-            value="Random-sky settings are saved locally."
-        )
+        self._select_page(0)
 
     def _build_ui(self) -> None:
-        frame = ttk.Frame(self, padding=22)
-        frame.grid(row=0, column=0, sticky="nsew")
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(2, weight=1)
+        root = QWidget()
+        self.setCentralWidget(root)
+        root_layout = QVBoxLayout(root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        header = ttk.Frame(frame)
-        header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=1)
-        ttk.Label(
-            header,
-            text="IOAA Blind Sky Trainer",
-            font=("TkDefaultFont", 18, "bold"),
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Button(
-            header,
-            text="Instructions & About…",
-            command=self._open_help,
-        ).grid(row=0, column=1, sticky="e", padx=(16, 0))
-        ttk.Label(
-            frame,
-            text=(
-                "Choose an exercise from the main page. Tools and random-sky "
-                "constraints are available in the secondary tabs."
-            ),
-            wraplength=700,
-            justify="left",
-        ).grid(row=1, column=0, sticky="ew", pady=(6, 16))
+        header = QFrame()
+        header.setObjectName("AppHeader")
+        h = QHBoxLayout(header)
+        h.setContentsMargins(22, 16, 22, 14)
+        title_box = QVBoxLayout()
+        title = QLabel("Sky Map Trainer")
+        title.setObjectName("Title")
+        title_box.addWidget(title)
+        h.addLayout(title_box, 1)
+        help_button = QPushButton("Help")
+        help_button.clicked.connect(self._open_help)
+        h.addWidget(help_button)
+        root_layout.addWidget(header)
 
-        self.notebook = ttk.Notebook(frame)
-        self.notebook.grid(row=2, column=0, sticky="nsew")
+        body = QHBoxLayout()
+        body.setContentsMargins(16, 0, 16, 16)
+        body.setSpacing(14)
+        root_layout.addLayout(body, 1)
 
-        activities_tab = ttk.Frame(self.notebook, padding=14)
-        tools_tab = ttk.Frame(self.notebook, padding=14)
-        settings_tab = ttk.Frame(self.notebook)
-        self.notebook.add(activities_tab, text="Exercises")
-        self.notebook.add(tools_tab, text="Tools")
-        self.notebook.add(settings_tab, text="Random sky settings")
-        self._build_activities_tab(activities_tab)
-        self._build_tools_tab(tools_tab)
-        settings_tab.columnconfigure(0, weight=1)
-        settings_tab.rowconfigure(0, weight=1)
-        settings_scroller = VerticalScrolledFrame(settings_tab, padding=14)
-        settings_scroller.grid(row=0, column=0, sticky="nsew")
-        self._build_settings_tab(settings_scroller.content)
-        self.notebook.select(activities_tab)
+        nav = QFrame()
+        nav.setObjectName("Sidebar")
+        nav.setFixedWidth(165)
+        nav_layout = QVBoxLayout(nav)
+        nav_layout.setContentsMargins(10, 12, 10, 12)
+        nav_layout.setSpacing(4)
+        self.nav_buttons: list[QPushButton] = []
+        for index, text in enumerate(("Exercises", "Tools", "Settings")):
+            button = QPushButton(text)
+            button.setCheckable(True)
+            button.setProperty("flatNav", True)
+            button.clicked.connect(lambda _checked=False, i=index: self._select_page(i))
+            nav_layout.addWidget(button)
+            self.nav_buttons.append(button)
+        nav_layout.addStretch(1)
+        body.addWidget(nav)
 
-        ttk.Label(
-            frame,
-            text=(
-                "First use requires internet access to cache the Hipparcos "
-                "catalogue and Stellarium constellation line data."
-            ),
-            wraplength=700,
-            justify="left",
-        ).grid(row=3, column=0, sticky="ew", pady=(14, 0))
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
 
-    def _build_activities_tab(self, tab: ttk.Frame) -> None:
-        tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(1, weight=1)
+        self.detail_nav = QFrame()
+        self.detail_nav.setObjectName("ContextNav")
+        detail_layout = QHBoxLayout(self.detail_nav)
+        detail_layout.setContentsMargins(4, 0, 4, 0)
+        detail_layout.setSpacing(10)
+        self.back_button = QPushButton("← Back")
+        self.back_button.setProperty("compact", True)
+        self.back_button.clicked.connect(self._navigate_back)
+        detail_layout.addWidget(self.back_button)
+        self.breadcrumb_label = _label("", muted=True, wrap=False)
+        detail_layout.addWidget(self.breadcrumb_label, 1)
+        self.detail_nav.setVisible(False)
+        content_layout.addWidget(self.detail_nav)
 
-        introduction = ttk.Frame(tab)
-        introduction.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        introduction.columnconfigure(0, weight=1)
-        ttk.Label(
-            introduction,
-            text="Training exercises",
-            font=("TkDefaultFont", 14, "bold"),
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            introduction,
-            text=(
-                "Open an exercise, solve the blind chart, reveal the answer, "
-                "then inspect the same sky in the analysis window."
-            ),
-            wraplength=650,
-            justify="left",
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self._build_activities_page())
+        self.pages.addWidget(self._build_tools_page())
+        self.pages.addWidget(self._build_settings_page())
+        content_layout.addWidget(self.pages, 1)
+        body.addWidget(content, 1)
 
-        exercise_frame = ttk.LabelFrame(tab, text="Available exercises", padding=8)
-        exercise_frame.grid(row=1, column=0, sticky="nsew")
-        exercise_frame.columnconfigure(0, weight=1)
-        exercise_frame.rowconfigure(0, weight=1)
-        exercise_scroller = VerticalScrolledFrame(exercise_frame, padding=4)
-        exercise_scroller.grid(row=0, column=0, sticky="nsew")
-        exercise_list = exercise_scroller.content
-        exercise_list.columnconfigure(0, weight=1)
+    ROOT_TITLES = ("Exercises", "Tools", "Settings")
+    def _select_page(self, index: int) -> None:
+        """Go directly to a primary section and close any nested views."""
+        self._clear_detail_stack()
+        self._current_root_index = index
+        self.pages.setCurrentIndex(index)
+        self._update_navigation_chrome()
 
+    def _push_detail(self, widget: QWidget, title: str) -> None:
+        """Show a view inside the existing launcher instead of a new window."""
+        widget.setMinimumSize(0, 0)
+        widget.setParent(self.pages)
+        widget.setWindowFlags(Qt.WindowType.Widget)
+        self.pages.addWidget(widget)
+        self._detail_stack.append((widget, title))
+        self.pages.setCurrentWidget(widget)
+        self._update_navigation_chrome()
+
+    def _navigate_back(self) -> None:
+        if not self._detail_stack:
+            return
+        widget, _title = self._detail_stack.pop()
+        self._dispose_detail(widget)
+        if self._detail_stack:
+            self.pages.setCurrentWidget(self._detail_stack[-1][0])
+        else:
+            self.pages.setCurrentIndex(self._current_root_index)
+        self._update_navigation_chrome()
+
+    def _clear_detail_stack(self) -> None:
+        while self._detail_stack:
+            widget, _title = self._detail_stack.pop()
+            self._dispose_detail(widget)
+
+    def _dispose_detail(self, widget: QWidget) -> None:
+        self.pages.removeWidget(widget)
+        widget.close()
+        widget.deleteLater()
+
+    def _update_navigation_chrome(self) -> None:
+        for i, button in enumerate(self.nav_buttons):
+            button.setChecked(i == self._current_root_index)
+        if not self._detail_stack:
+            self.detail_nav.setVisible(False)
+            return
+        breadcrumb = "  /  ".join(
+            [self.ROOT_TITLES[self._current_root_index]]
+            + [title for _widget, title in self._detail_stack]
+        )
+        self.back_button.setText("← Back")
+        self.breadcrumb_label.setText(breadcrumb)
+        self.detail_nav.setVisible(True)
+
+    def _scroll_page(self, content: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        return scroll
+
+    def _build_activities_page(self) -> QWidget:
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(12)
+        title = QLabel("Exercises"); title.setObjectName("PageTitle"); layout.addWidget(title)
         if not self.activities:
-            ttk.Label(exercise_list, text="No exercise modules were found.").grid(
-                row=0,
-                column=0,
-                sticky="w",
-            )
-            return
+            layout.addWidget(_label("No exercise modules were found."))
+        else:
+            cards = QGridLayout()
+            cards.setHorizontalSpacing(12)
+            cards.setVerticalSpacing(12)
+            for index, discovered in enumerate(self.activities):
+                exercise = discovered.instance
+                card, card_layout = _card()
+                heading = QLabel(exercise.title); heading.setObjectName("SectionTitle"); heading.setWordWrap(True)
+                action_row = QHBoxLayout()
+                action_row.addWidget(heading, 1)
+                open_button = QPushButton("Start")
+                open_button.setProperty("primary", True)
+                open_button.clicked.connect(lambda _checked=False, d=discovered: self._launch_exercise(d))
+                action_row.addWidget(open_button)
+                card_layout.addLayout(action_row)
+                cards.addWidget(card, index // 2, index % 2)
+            cards.setColumnStretch(0, 1)
+            cards.setColumnStretch(1, 1)
+            layout.addLayout(cards)
+        layout.addStretch(1)
+        return self._scroll_page(content)
 
-        for row, discovered in enumerate(self.activities):
-            exercise = discovered.instance
-            item = ttk.Frame(exercise_list)
-            item.grid(row=row, column=0, sticky="ew", pady=(0 if row == 0 else 10, 0))
-            item.columnconfigure(0, weight=1)
-            ttk.Label(
-                item,
-                text=exercise.title,
-                font=("TkDefaultFont", 11, "bold"),
-            ).grid(row=0, column=0, sticky="w")
-            ttk.Label(
-                item,
-                text=exercise.description,
-                wraplength=530,
-                justify="left",
-            ).grid(row=1, column=0, sticky="ew", pady=(2, 0))
-            ttk.Button(
-                item,
-                text="Open",
-                command=lambda selected=discovered: self._launch_exercise(selected),
-            ).grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
-
-    def _build_tools_tab(self, tab: ttk.Frame) -> None:
-        tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(1, weight=1)
-
-        introduction = ttk.Frame(tab)
-        introduction.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        introduction.columnconfigure(0, weight=1)
-        ttk.Label(
-            introduction,
-            text="Tools",
-            font=("TkDefaultFont", 14, "bold"),
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            introduction,
-            text=(
-                "Open a supporting astronomy utility. New tools can be added as "
-                "independent modules and are discovered automatically."
-            ),
-            wraplength=650,
-            justify="left",
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
-
-        tool_frame = ttk.LabelFrame(tab, text="Available tools", padding=8)
-        tool_frame.grid(row=1, column=0, sticky="nsew")
-        tool_frame.columnconfigure(0, weight=1)
-        tool_frame.rowconfigure(0, weight=1)
-        tool_scroller = VerticalScrolledFrame(tool_frame, padding=4)
-        tool_scroller.grid(row=0, column=0, sticky="nsew")
-        tool_list = tool_scroller.content
-        tool_list.columnconfigure(0, weight=1)
-
-        if not self.tools:
-            ttk.Label(tool_list, text="No tool modules were found.").grid(
-                row=0,
-                column=0,
-                sticky="w",
-            )
-            return
-
-        for row, discovered in enumerate(self.tools):
+    def _build_tools_page(self) -> QWidget:
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(12)
+        title = QLabel("Tools"); title.setObjectName("PageTitle"); layout.addWidget(title)
+        cards = QGridLayout()
+        cards.setHorizontalSpacing(12)
+        cards.setVerticalSpacing(12)
+        for index, discovered in enumerate(self.tools):
             tool = discovered.instance
-            item = ttk.Frame(tool_list)
-            item.grid(row=row, column=0, sticky="ew", pady=(0 if row == 0 else 10, 0))
-            item.columnconfigure(0, weight=1)
-            ttk.Label(
-                item,
-                text=tool.title,
-                font=("TkDefaultFont", 11, "bold"),
-            ).grid(row=0, column=0, sticky="w")
-            ttk.Label(
-                item,
-                text=tool.description,
-                wraplength=530,
-                justify="left",
-            ).grid(row=1, column=0, sticky="ew", pady=(2, 0))
-            ttk.Button(
-                item,
-                text="Open",
-                command=lambda selected=discovered: self._launch_tool(selected),
-            ).grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
+            card, card_layout = _card()
+            heading = QLabel(tool.title); heading.setObjectName("SectionTitle")
+            row = QHBoxLayout(); row.addWidget(heading, 1)
+            button = QPushButton("Open")
+            button.setProperty("primary", True)
+            button.clicked.connect(lambda _checked=False, d=discovered: self._launch_tool(d))
+            row.addWidget(button)
+            card_layout.addLayout(row)
+            cards.addWidget(card, 0, index)
+            cards.setColumnStretch(index, 1)
+        layout.addLayout(cards)
+        if not self.tools:
+            layout.addWidget(_label("No tool modules were found."))
+        layout.addStretch(1)
+        return self._scroll_page(content)
 
-    def _build_settings_tab(self, tab: ttk.Frame) -> None:
-        tab.columnconfigure(0, weight=1)
-
-        objects = ttk.LabelFrame(tab, text="Objects included in blind maps", padding=10)
-        objects.grid(row=0, column=0, sticky="ew")
-        ToggleSwitch(
-            objects,
-            text="Include visible Sun, Moon, and planets",
-            variable=self.include_solar_var,
-        ).grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            objects,
-            text=(
-                "When enabled, solar-system objects appear as unlabelled markers. "
-                "The default remains the original star-only chart."
-            ),
-            wraplength=650,
-            justify="left",
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 0))
-
-        coordinates = ttk.LabelFrame(tab, text="Observer coordinates", padding=10)
-        coordinates.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        coordinates.columnconfigure(1, weight=1)
-        ttk.Radiobutton(
-            coordinates,
-            text="Random coordinates",
-            variable=self.coordinate_mode_var,
+    def _build_settings_page(self) -> QWidget:
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(12)
+        title = QLabel("Settings"); title.setObjectName("PageTitle"); layout.addWidget(title)
+        coordinates = QGroupBox("Location")
+        cg = QGridLayout(coordinates)
+        self.coordinate_mode_selector = SegmentedControl(
+            (("random", "Random"), ("fixed", "Fixed")),
             value="random",
-            command=self._update_constraint_states,
-        ).grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Radiobutton(
-            coordinates,
-            text="Fixed coordinates",
-            variable=self.coordinate_mode_var,
-            value="fixed",
-            command=self._update_constraint_states,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(3, 5))
-        ttk.Label(coordinates, text="Latitude (°)").grid(row=2, column=0, sticky="w")
-        self.latitude_entry = ttk.Entry(coordinates, textvariable=self.latitude_var)
-        self.latitude_entry.grid(row=2, column=1, sticky="ew", padx=(10, 0))
-        ttk.Label(coordinates, text="Longitude (°)").grid(
-            row=3, column=0, sticky="w", pady=(5, 0)
         )
-        self.longitude_entry = ttk.Entry(coordinates, textvariable=self.longitude_var)
-        self.longitude_entry.grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=(5, 0))
+        self.coordinate_mode_selector.valueChanged.connect(lambda _value: self._update_constraint_states())
+        cg.addWidget(self.coordinate_mode_selector, 0, 0, 1, 2)
+        self.latitude_label = QLabel("Latitude (°)"); cg.addWidget(self.latitude_label, 1, 0); self.latitude_entry = QLineEdit(); cg.addWidget(self.latitude_entry, 1, 1)
+        self.longitude_label = QLabel("Longitude (°)"); cg.addWidget(self.longitude_label, 2, 0); self.longitude_entry = QLineEdit(); cg.addWidget(self.longitude_entry, 2, 1)
+        cg.setColumnStretch(1, 1)
+        layout.addWidget(coordinates)
 
-        time_frame = ttk.LabelFrame(tab, text="Observation time", padding=10)
-        time_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        time_frame.columnconfigure(1, weight=1)
-        ttk.Label(time_frame, text="Input form").grid(row=0, column=0, sticky="w")
-        self.time_mode_combo = ttk.Combobox(
-            time_frame,
-            textvariable=self.time_mode_display_var,
-            state="readonly",
-            values=tuple(TIME_MODE_LABELS.values()),
-        )
-        self.time_mode_combo.grid(row=0, column=1, sticky="ew", padx=(10, 0))
-        self.time_mode_combo.bind("<<ComboboxSelected>>", self._time_mode_changed)
-        ttk.Label(
-            time_frame,
-            text="LST uses the selected longitude and a UTC reference date.",
-            wraplength=650,
-            justify="left",
-        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(3, 6))
+        time_group = QGroupBox("Time")
+        tg = QGridLayout(time_group)
+        tg.addWidget(QLabel("Mode"), 0, 0)
+        self.time_mode_combo = QComboBox(); self.time_mode_combo.addItems(TIME_MODE_LABELS.values()); self.time_mode_combo.currentTextChanged.connect(self._update_constraint_states)
+        tg.addWidget(self.time_mode_combo, 0, 1)
+        self.time_note = _label("", muted=True); tg.addWidget(self.time_note, 1, 0, 1, 2)
+        self.date_label = QLabel("UTC date"); tg.addWidget(self.date_label, 2, 0); self.date_entry = QLineEdit(); self.date_entry.setPlaceholderText("YYYY-MM-DD"); tg.addWidget(self.date_entry, 2, 1)
+        self.time_label = QLabel("UTC time"); tg.addWidget(self.time_label, 3, 0); self.time_entry = QLineEdit(); self.time_entry.setPlaceholderText("HH:MM:SS"); tg.addWidget(self.time_entry, 3, 1)
+        self.lst_date_label = QLabel("Date"); tg.addWidget(self.lst_date_label, 4, 0); self.lst_date_entry = QLineEdit(); self.lst_date_entry.setPlaceholderText("YYYY-MM-DD"); tg.addWidget(self.lst_date_entry, 4, 1)
+        self.lst_time_label = QLabel("LST"); tg.addWidget(self.lst_time_label, 5, 0); self.lst_time_entry = QLineEdit(); self.lst_time_entry.setPlaceholderText("HH:MM:SS or hours"); tg.addWidget(self.lst_time_entry, 5, 1)
+        self.mjd_label = QLabel("MJD"); tg.addWidget(self.mjd_label, 6, 0); self.mjd_entry = QLineEdit(); tg.addWidget(self.mjd_entry, 6, 1)
+        tg.setColumnStretch(1, 1)
+        layout.addWidget(time_group)
 
-        ttk.Label(time_frame, text="UTC date (YYYY-MM-DD)").grid(row=2, column=0, sticky="w")
-        self.date_entry = ttk.Entry(time_frame, textvariable=self.fixed_date_var)
-        self.date_entry.grid(row=2, column=1, sticky="ew", padx=(10, 0))
-        ttk.Label(time_frame, text="UTC time (HH:MM:SS)").grid(
-            row=3, column=0, sticky="w", pady=(4, 0)
-        )
-        self.time_entry = ttk.Entry(time_frame, textvariable=self.fixed_time_var)
-        self.time_entry.grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
+        view = QGroupBox("Display")
+        vl = QVBoxLayout(view)
+        self.include_solar_var = BooleanVar(False)
+        self.include_solar_switch = ToggleSwitch(text="Sun, Moon and planets", variable=self.include_solar_var)
+        vl.addWidget(self.include_solar_switch)
+        self.inverted_var = BooleanVar(False); vl.addWidget(ToggleSwitch(text="Invert colours", variable=self.inverted_var))
+        self.night_var = BooleanVar(False); self.night_switch = ToggleSwitch(text="Night mode", variable=self.night_var, command=self._night_mode_changed); vl.addWidget(self.night_switch)
+        self.rotation_var = BooleanVar(True); vl.addWidget(ToggleSwitch(text="Random rotation", variable=self.rotation_var))
+        self.sky_radius_slider, self.sky_radius_value = self._slider_row(vl, "Coverage", 0, 1800, 10)
+        self.magnitude_slider, self.magnitude_value = self._slider_row(vl, "Magnitude limit", -15, 80, 10)
+        self.marker_slider, self.marker_value = self._slider_row(vl, "Star size", 45, 200, 100)
+        layout.addWidget(view)
 
-        ttk.Label(time_frame, text="LST reference date").grid(
-            row=4, column=0, sticky="w", pady=(4, 0)
-        )
-        self.lst_date_entry = ttk.Entry(time_frame, textvariable=self.fixed_lst_date_var)
-        self.lst_date_entry.grid(row=4, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
-        ttk.Label(time_frame, text="LST (HH:MM:SS or hours)").grid(
-            row=5, column=0, sticky="w", pady=(4, 0)
-        )
-        self.lst_time_entry = ttk.Entry(time_frame, textvariable=self.fixed_lst_time_var)
-        self.lst_time_entry.grid(row=5, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
+        actions = QHBoxLayout()
+        save = QPushButton("Save"); save.setProperty("primary", True); save.clicked.connect(lambda: self._save_settings(show_confirmation=True))
+        defaults = QPushButton("Reset"); defaults.clicked.connect(self._restore_defaults)
+        actions.addWidget(save); actions.addWidget(defaults); actions.addStretch(1)
+        layout.addLayout(actions)
+        self.settings_status = QLabel(""); self.settings_status.setObjectName("Status"); self.settings_status.setWordWrap(True); self.settings_status.setVisible(False); layout.addWidget(self.settings_status)
+        layout.addStretch(1)
+        return self._scroll_page(content)
 
-        ttk.Label(time_frame, text="MJD (UTC)").grid(
-            row=6, column=0, sticky="w", pady=(4, 0)
-        )
-        self.mjd_entry = ttk.Entry(time_frame, textvariable=self.fixed_mjd_var)
-        self.mjd_entry.grid(row=6, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
+    def _slider_row(self, parent: QVBoxLayout, text: str, minimum: int, maximum: int, divisor: int) -> tuple[QSlider, QLabel]:
+        header = QHBoxLayout(); header.addWidget(QLabel(text)); header.addStretch(1); value = QLabel(); value.setObjectName("Muted"); header.addWidget(value); parent.addLayout(header)
+        slider = QSlider(Qt.Orientation.Horizontal); slider.setRange(minimum, maximum); slider.setProperty("divisor", divisor); parent.addWidget(slider)
+        slider.valueChanged.connect(self._update_view_readouts)
+        return slider, value
 
-        view = ttk.LabelFrame(tab, text="View", padding=10)
-        view.grid(row=3, column=0, sticky="ew", pady=(10, 0))
-        view.columnconfigure(0, weight=1)
-        ToggleSwitch(
-            view,
-            text="Invert map colours (white stars on black background)",
-            variable=self.inverted_colors_var,
-        ).grid(row=0, column=0, sticky="w")
-        ToggleSwitch(
-            view,
-            text="Night mode (red-only interface and charts)",
-            variable=self.night_mode_var,
-            command=self._night_mode_changed,
-        ).grid(row=1, column=0, sticky="w", pady=(5, 0))
-        ToggleSwitch(
-            view,
-            text="Randomise map rotation (otherwise north is up)",
-            variable=self.enable_map_rotation_var,
-        ).grid(row=2, column=0, sticky="w", pady=(5, 0))
-        self._build_scale(
-            view,
-            row=3,
-            label="Sky coverage from zenith",
-            variable=self.sky_radius_var,
-            value_variable=self.sky_radius_value_var,
-            from_value=0.0,
-            to_value=180.0,
-            command=self._view_setting_changed,
-        )
-        self._build_scale(
-            view,
-            row=5,
-            label="Faintest visible magnitude",
-            variable=self.faintest_magnitude_var,
-            value_variable=self.faintest_magnitude_value_var,
-            from_value=-1.5,
-            to_value=8.0,
-            command=self._view_setting_changed,
-        )
-        self._build_scale(
-            view,
-            row=7,
-            label="Star marker scale",
-            variable=self.star_marker_scale_var,
-            value_variable=self.star_marker_scale_value_var,
-            from_value=0.45,
-            to_value=2.0,
-            command=self._view_setting_changed,
-        )
-        ttk.Label(
-            view,
-            text=(
-                "0° is the zenith point, 90° is one hemisphere ending at the "
-                "horizon, and 180° is the full celestial sphere."
-            ),
-            wraplength=650,
-            justify="left",
-        ).grid(row=9, column=0, sticky="ew", pady=(5, 0))
-
-        actions = ttk.Frame(tab)
-        actions.grid(row=4, column=0, sticky="ew", pady=(12, 0))
-        actions.columnconfigure((0, 1), weight=1)
-        ttk.Button(
-            actions,
-            text="Save settings",
-            command=lambda: self._save_settings(show_confirmation=True),
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        ttk.Button(
-            actions,
-            text="Restore defaults",
-            command=self._restore_defaults,
-        ).grid(row=0, column=1, sticky="ew", padx=(5, 0))
-        ttk.Label(
-            tab,
-            textvariable=self.settings_status_var,
-            wraplength=680,
-            justify="left",
-        ).grid(row=5, column=0, sticky="ew", pady=(8, 0))
-
-    @staticmethod
-    def _build_scale(
-        parent: ttk.Widget,
-        *,
-        row: int,
-        label: str,
-        variable: tk.DoubleVar,
-        value_variable: tk.StringVar,
-        from_value: float,
-        to_value: float,
-        command,
-    ) -> None:
-        header = ttk.Frame(parent)
-        header.grid(row=row, column=0, sticky="ew", pady=(7 if row else 0, 0))
-        header.columnconfigure(0, weight=1)
-        ttk.Label(header, text=label).grid(row=0, column=0, sticky="w")
-        ttk.Label(header, textvariable=value_variable).grid(row=0, column=1, sticky="e")
-        ttk.Scale(
-            parent,
-            from_=from_value,
-            to=to_value,
-            variable=variable,
-            command=command,
-        ).grid(row=row + 1, column=0, sticky="ew", pady=(3, 0))
-
-    def _night_mode_changed(self) -> None:
-        apply_night_theme(self, self.night_mode_var.get())
-        self.settings_status_var.set(
-            "Night mode preview updated; select Save settings to use it in new windows."
-        )
-
-    def _view_setting_changed(self, _value: str | None = None) -> None:
+    def _load_settings_into_ui(self, settings: GenerationSettings) -> None:
+        fixed = settings.fixed_datetime()
+        self.include_solar_var.set(settings.include_solar_system_objects)
+        self.coordinate_mode_selector.set_value(settings.coordinate_mode if settings.coordinate_mode in {"random", "fixed"} else "random")
+        self.latitude_entry.setText(f"{settings.fixed_latitude:.6f}")
+        self.longitude_entry.setText(f"{settings.fixed_longitude:.6f}")
+        self.time_mode_combo.setCurrentText(TIME_MODE_LABELS.get(settings.time_mode, TIME_MODE_LABELS["random"]))
+        self.date_entry.setText(f"{fixed:%Y-%m-%d}"); self.time_entry.setText(f"{fixed:%H:%M:%S}")
+        self.lst_date_entry.setText(settings.fixed_lst_date); self.lst_time_entry.setText(settings.fixed_lst_time); self.mjd_entry.setText(f"{settings.fixed_mjd:.6f}")
+        self.inverted_var.set(settings.inverted_colors); self.night_var.set(settings.night_mode); self.rotation_var.set(settings.enable_map_rotation)
+        self.sky_radius_slider.setValue(round(settings.sky_radius_degrees * 10)); self.magnitude_slider.setValue(round(settings.faintest_visible_magnitude * 10)); self.marker_slider.setValue(round(settings.star_marker_scale * 100))
         self._update_view_readouts()
 
     def _update_view_readouts(self) -> None:
-        radius = float(self.sky_radius_var.get())
-        if abs(radius - 180.0) < 0.6:
-            radius_text = f"{radius:.0f}° (full sky)"
-        elif abs(radius - 90.0) < 0.6:
-            radius_text = f"{radius:.0f}° (hemisphere)"
-        else:
-            radius_text = f"{radius:.0f}°"
-        self.sky_radius_value_var.set(radius_text)
-        self.faintest_magnitude_value_var.set(
-            f"{float(self.faintest_magnitude_var.get()):.1f}"
-        )
-        self.star_marker_scale_value_var.set(
-            f"{float(self.star_marker_scale_var.get()):.2f}×"
-        )
+        radius = self.sky_radius_slider.value() / 10.0
+        suffix = " (full sky)" if abs(radius-180)<0.6 else (" (hemisphere)" if abs(radius-90)<0.6 else "")
+        self.sky_radius_value.setText(f"{radius:.0f}°{suffix}")
+        self.magnitude_value.setText(f"{self.magnitude_slider.value()/10:.1f}")
+        self.marker_value.setText(f"{self.marker_slider.value()/100:.2f}×")
 
-    def _time_mode_changed(self, _event=None) -> None:
-        self.time_mode_var.set(
-            TIME_MODE_VALUES.get(self.time_mode_display_var.get(), "random")
-        )
-        self._update_constraint_states()
+    def _night_mode_changed(self) -> None:
+        apply_night_theme(self, self.night_var.get())
+        self.settings_status.setText("Preview only — save to keep.")
+        self.settings_status.setVisible(True)
 
     def _update_constraint_states(self) -> None:
-        coordinate_state = (
-            "normal" if self.coordinate_mode_var.get() == "fixed" else "disabled"
+        fixed = self.coordinate_mode_selector.value() == "fixed"
+        for widget in (self.latitude_label, self.latitude_entry, self.longitude_label, self.longitude_entry):
+            widget.setVisible(fixed)
+        mode = TIME_MODE_VALUES.get(self.time_mode_combo.currentText(), "random")
+        self.time_note.setVisible(False)
+        groups = (
+            ((self.date_label, self.date_entry, self.time_label, self.time_entry), mode == "fixed_utc"),
+            ((self.lst_date_label, self.lst_date_entry, self.lst_time_label, self.lst_time_entry), mode == "fixed_lst"),
+            ((self.mjd_label, self.mjd_entry), mode == "fixed_mjd"),
         )
-        for widget in (self.latitude_entry, self.longitude_entry):
-            widget.configure(state=coordinate_state)
-
-        mode = self.time_mode_var.get()
-        utc_state = "normal" if mode == "fixed_utc" else "disabled"
-        lst_state = "normal" if mode == "fixed_lst" else "disabled"
-        mjd_state = "normal" if mode == "fixed_mjd" else "disabled"
-        for widget in (self.date_entry, self.time_entry):
-            widget.configure(state=utc_state)
-        for widget in (self.lst_date_entry, self.lst_time_entry):
-            widget.configure(state=lst_state)
-        self.mjd_entry.configure(state=mjd_state)
+        for widgets, visible in groups:
+            for widget in widgets:
+                widget.setVisible(visible)
 
     def _collect_settings(self) -> GenerationSettings:
         defaults = self._loaded_settings
-        coordinate_mode = self.coordinate_mode_var.get()
-        time_mode = self.time_mode_var.get()
-
+        coordinate_mode = self.coordinate_mode_selector.value()
+        time_mode = TIME_MODE_VALUES.get(self.time_mode_combo.currentText(), "random")
         try:
-            latitude = float(self.latitude_var.get().strip())
-            longitude = float(self.longitude_var.get().strip())
+            latitude = float(self.latitude_entry.text().strip()); longitude = float(self.longitude_entry.text().strip())
         except ValueError as error:
-            if coordinate_mode == "fixed":
-                raise ValueError("Latitude and longitude must be numbers.") from error
-            latitude = defaults.fixed_latitude
-            longitude = defaults.fixed_longitude
-
+            if coordinate_mode == "fixed": raise ValueError("Latitude and longitude must be numbers.") from error
+            latitude, longitude = defaults.fixed_latitude, defaults.fixed_longitude
         try:
-            fixed_datetime = datetime.strptime(
-                f"{self.fixed_date_var.get().strip()} "
-                f"{self.fixed_time_var.get().strip()}",
-                "%Y-%m-%d %H:%M:%S",
-            ).replace(tzinfo=timezone.utc)
+            fixed_datetime = datetime.strptime(f"{self.date_entry.text().strip()} {self.time_entry.text().strip()}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         except ValueError as error:
-            if time_mode == "fixed_utc":
-                raise ValueError(
-                    "Fixed UTC date/time must use YYYY-MM-DD and HH:MM:SS."
-                ) from error
+            if time_mode == "fixed_utc": raise ValueError("Fixed UTC date/time must use YYYY-MM-DD and HH:MM:SS.") from error
             fixed_datetime = defaults.fixed_datetime()
-
         try:
-            fixed_mjd = float(self.fixed_mjd_var.get().strip())
+            fixed_mjd = float(self.mjd_entry.text().strip())
         except ValueError as error:
-            if time_mode == "fixed_mjd":
-                raise ValueError("Fixed MJD must be a number.") from error
+            if time_mode == "fixed_mjd": raise ValueError("Fixed MJD must be a number.") from error
             fixed_mjd = defaults.fixed_mjd
-
-        settings = GenerationSettings(
-            include_solar_system_objects=self.include_solar_var.get(),
-            coordinate_mode=coordinate_mode,
-            fixed_latitude=latitude,
-            fixed_longitude=longitude,
-            time_mode=time_mode,
-            fixed_utc_datetime=fixed_datetime.isoformat(),
-            fixed_lst_date=self.fixed_lst_date_var.get().strip(),
-            fixed_lst_time=self.fixed_lst_time_var.get().strip(),
-            fixed_mjd=fixed_mjd,
-            inverted_colors=self.inverted_colors_var.get(),
-            night_mode=self.night_mode_var.get(),
-            sky_radius_degrees=float(self.sky_radius_var.get()),
-            faintest_visible_magnitude=float(self.faintest_magnitude_var.get()),
-            star_marker_scale=float(self.star_marker_scale_var.get()),
-            enable_map_rotation=self.enable_map_rotation_var.get(),
+        return GenerationSettings(
+            include_solar_system_objects=self.include_solar_var.get(), coordinate_mode=coordinate_mode,
+            fixed_latitude=latitude, fixed_longitude=longitude, time_mode=time_mode,
+            fixed_utc_datetime=fixed_datetime.isoformat(), fixed_lst_date=self.lst_date_entry.text().strip(),
+            fixed_lst_time=self.lst_time_entry.text().strip(), fixed_mjd=fixed_mjd,
+            inverted_colors=self.inverted_var.get(), night_mode=self.night_var.get(),
+            sky_radius_degrees=self.sky_radius_slider.value()/10.0,
+            faintest_visible_magnitude=self.magnitude_slider.value()/10.0,
+            star_marker_scale=self.marker_slider.value()/100.0,
+            enable_map_rotation=self.rotation_var.get(),
         ).validated()
-        return settings
 
     def _save_settings(self, *, show_confirmation: bool) -> bool:
         try:
-            settings = self._collect_settings()
-            save_generation_settings(settings)
-            self._loaded_settings = settings
+            settings = self._collect_settings(); save_generation_settings(settings); self._loaded_settings = settings
         except (OSError, ValueError) as error:
-            messagebox.showerror("Invalid generation settings", str(error), parent=self)
-            return False
-        self.settings_status_var.set("Random-sky settings saved locally.")
+            QMessageBox.critical(self, "Invalid generation settings", str(error)); return False
+        self.settings_status.setText("Saved.")
+        self.settings_status.setVisible(True)
         if show_confirmation:
-            messagebox.showinfo(
-                "Settings saved",
-                "New exercise processes will use these random-sky settings.",
-                parent=self,
-            )
+            QMessageBox.information(self, "Saved", "Settings saved.")
         return True
 
     def _restore_defaults(self) -> None:
-        defaults = GenerationSettings()
-        fixed_time = defaults.fixed_datetime()
-        self.include_solar_var.set(defaults.include_solar_system_objects)
-        self.coordinate_mode_var.set(defaults.coordinate_mode)
-        self.latitude_var.set(f"{defaults.fixed_latitude:.6f}")
-        self.longitude_var.set(f"{defaults.fixed_longitude:.6f}")
-        self.time_mode_var.set(defaults.time_mode)
-        self.time_mode_display_var.set(TIME_MODE_LABELS[defaults.time_mode])
-        self.fixed_date_var.set(f"{fixed_time:%Y-%m-%d}")
-        self.fixed_time_var.set(f"{fixed_time:%H:%M:%S}")
-        self.fixed_lst_date_var.set(defaults.fixed_lst_date)
-        self.fixed_lst_time_var.set(defaults.fixed_lst_time)
-        self.fixed_mjd_var.set(f"{float(defaults.fixed_mjd):.6f}")
-        self.inverted_colors_var.set(defaults.inverted_colors)
-        self.night_mode_var.set(False)
-        self.enable_map_rotation_var.set(defaults.enable_map_rotation)
-        self.sky_radius_var.set(defaults.sky_radius_degrees)
-        self.faintest_magnitude_var.set(defaults.faintest_visible_magnitude)
-        self.star_marker_scale_var.set(defaults.star_marker_scale)
-        self._update_view_readouts()
+        self._load_settings_into_ui(GenerationSettings())
+        apply_night_theme(self, self.night_var.get())
         self._update_constraint_states()
-        apply_night_theme(self, False)
-        self.settings_status_var.set(
-            "Defaults restored in the form; select Save settings to apply."
-        )
+        self.settings_status.setText("Defaults restored — save to keep.")
+        self.settings_status.setVisible(True)
 
     def _open_help(self) -> None:
-        HelpWindow(self)
+        if self._detail_stack and self._detail_stack[-1][1] == "Help & About":
+            return
+        self._push_detail(HelpPage(self), "Help & About")
 
     def _launch_exercise(self, discovered: DiscoveredActivity) -> None:
         if not self._save_settings(show_confirmation=False):
             return
         try:
-            subprocess.Popen(
-                [sys.executable, str(discovered.file_path)],
-                cwd=str(PROJECT_ROOT),
-            )
-        except OSError as error:
-            messagebox.showerror("Could not launch exercise", str(error), parent=self)
+            from ioaa_trainer.activity_ui import ActivityApplication
+
+            exercise = discovered.instance
+            view = ActivityApplication(exercise, analysis_navigator=self._open_analysis)
+        except Exception as error:
+            QMessageBox.critical(self, "Could not open exercise", f"{type(error).__name__}: {error}")
+            return
+        self._push_detail(view, exercise.title)
+
+    def _open_analysis(self, bundle, activity: SkyActivity) -> None:
+        try:
+            from ioaa_trainer.analysis_ui import AnalysisWindow
+
+            parent = self._detail_stack[-1][0] if self._detail_stack else self
+            view = AnalysisWindow(parent, bundle, activity, back_callback=self._navigate_back)
+        except Exception as error:
+            QMessageBox.critical(self, "Could not open sky analysis", f"{type(error).__name__}: {error}")
+            return
+        self._push_detail(view, "Sky analysis")
 
     def _launch_tool(self, discovered: DiscoveredTool) -> None:
         if not self._save_settings(show_confirmation=False):
             return
-        try:
-            subprocess.Popen(
-                [sys.executable, str(discovered.file_path)],
-                cwd=str(PROJECT_ROOT),
+        factory = getattr(discovered.module, "create_widget", None)
+        if not callable(factory):
+            QMessageBox.critical(
+                self,
+                "Tool cannot open in the app",
+                f"{discovered.instance.title} does not provide an embeddable Qt view.",
             )
-        except OSError as error:
-            messagebox.showerror("Could not launch tool", str(error), parent=self)
+            return
+        try:
+            view = factory()
+        except Exception as error:
+            QMessageBox.critical(self, "Could not open tool", f"{type(error).__name__}: {error}")
+            return
+        self._push_detail(view, discovered.instance.title)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self._clear_detail_stack()
+        event.accept()
 
 
-def dependency_check(
-    activities: list[DiscoveredActivity],
-    tools: list[DiscoveredTool],
-) -> int:
+def dependency_check(activities: list[DiscoveredActivity], tools: list[DiscoveredTool]) -> int:
     print("Python:", sys.version.split()[0])
+    print("UI: PyQt6")
     print("Discovered exercises:")
-    for discovered in activities:
-        print(" -", discovered.instance.title, "->", discovered.file_path.name)
+    for discovered in activities: print(" -", discovered.instance.title, "->", discovered.file_path.name)
     print("Discovered tools:")
-    for discovered in tools:
-        print(" -", discovered.instance.title, "->", discovered.file_path.name)
+    for discovered in tools: print(" -", discovered.instance.title, "->", discovered.file_path.name)
     print("Generation settings: stored locally for the current user")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="check imports plus exercise and tool discovery without opening a window",
-    )
+    parser.add_argument("--check", action="store_true", help="check imports plus exercise and tool discovery without opening a window")
     args = parser.parse_args()
-
-    activities = discover_activities()
-    tools = discover_tools()
-    if args.check:
-        return dependency_check(activities, tools)
-
-    app = Launcher(activities, tools)
-    app.mainloop()
-    return 0
+    activities = discover_activities(); tools = discover_tools()
+    if args.check: return dependency_check(activities, tools)
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName("Sky Map Trainer")
+    window = Launcher(activities, tools); window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":

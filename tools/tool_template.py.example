@@ -20,9 +20,18 @@ class ExampleTool(SkyTool):
 TOOL_CLASS = ExampleTool
 
 
+def create_widget():
+    """Return a QWidget for the launcher's in-app navigation stack."""
+    # Import your QWidget-based tool UI lazily here and return an instance.
+    # Example:
+    # from ioaa_trainer.your_tool_ui import YourToolApplication
+    # return YourToolApplication()
+    raise NotImplementedError("Implement this tool's embeddable QWidget.")
+
+
 def run_tool() -> int:
-    # Import and open your Tkinter window here.
-    # Keep this file independently runnable, just like the exercise modules.
+    # Keep a standalone runner too, so the tool can still be launched directly.
+    # The main app uses create_widget() instead.
     print("Implement this tool's UI in run_tool().")
     return 0
 
