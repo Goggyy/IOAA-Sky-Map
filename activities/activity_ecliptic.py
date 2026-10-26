@@ -19,7 +19,7 @@ from ioaa_trainer.targeting import constellation_target_region
 
 class EclipticActivity(SkyActivity):
     activity_id = "ecliptic"
-    title = "Exercise 2 — Ecliptic"
+    title = "2 · Ecliptic"
     description = (
         "Use the stellar pattern in a randomly generated, unlabeled sky to identify "
         "the ecliptic. The answer also identifies the visible zodiacal constellations."

@@ -1,4 +1,4 @@
-"""Exercise 6: name a circled bright star and give its Bayer designation."""
+"""Exercise 5: name a circled bright star and give its Bayer designation."""
 
 from __future__ import annotations
 
@@ -9,21 +9,21 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ioaa_trainer.activity_api import QuestionUnavailable, SkyActivity
+from ioaa_trainer.activity_api import ActivityOption, QuestionUnavailable, SkyActivity
 from ioaa_trainer.activity_ui import run_activity
 from ioaa_trainer.models import ActivityQuestion, SkyMapModel
-from ioaa_trainer.reference_data import BRIGHTEST_STAR_BY_HIP
 from ioaa_trainer.rendering import SkyMapRenderer
+from ioaa_trainer.star_sets import STAR_SETS, STAR_SET_CHOICES
 
 
 class NameStarActivity(SkyActivity):
     activity_id = "name_star"
-    title = "Exercise 6 — Name the Star"
+    title = "5 · Name Star"
     description = (
-        "A circle marks one of approximately the 20 brightest night-sky stars. "
-        "Give both its IAU-approved proper name and Bayer designation."
+        "Name a circled star and give its Bayer designation."
     )
     minimum_target_altitude = 8.0
+    activity_options = (ActivityOption("star_set", "Set", STAR_SET_CHOICES, "top_60"),)
 
     def create_question(
         self,
@@ -42,24 +42,22 @@ class NameStarActivity(SkyActivity):
 
         candidates = [
             identity
-            for hip, identity in BRIGHTEST_STAR_BY_HIP.items()
-            if hip in visible_by_hip
-            and visible_by_hip[hip][0] >= self.minimum_target_altitude
+            for identity in STAR_SETS[self.selected_option("star_set")]
+            if identity.hip in visible_by_hip
+            and visible_by_hip[identity.hip][0] >= self.minimum_target_altitude
         ]
         if not candidates:
-            raise QuestionUnavailable("none of the bright-star targets is high enough")
+            raise QuestionUnavailable("no stars from this set are high enough")
 
-        identity = rng.choice(sorted(candidates, key=lambda star: star.iau_name))
+        identity = rng.choice(sorted(candidates, key=lambda star: star.name))
         altitude, azimuth, magnitude = visible_by_hip[identity.hip]
         return ActivityQuestion(
-            prompt=(
-                "Name the circled star. Give its IAU-approved name and its "
-                "Bayer designation."
-            ),
+            prompt="Identify the circled star (name, if any, and Bayer designation).",
             answer_text=f"Answer: {identity.answer}.",
             payload={
                 "hip": identity.hip,
-                "iau_name": identity.iau_name,
+                "iau_name": identity.name,
+                "display_label": identity.answer,
                 "bayer_full": identity.bayer_full,
                 "bayer_short": identity.bayer_short,
                 "altitude": altitude,
@@ -101,11 +99,7 @@ class NameStarActivity(SkyActivity):
         renderer.draw_upright_label(
             altitude,
             azimuth,
-            (
-                f"{question.payload['iau_name']}\n"
-                f"{question.payload['bayer_full']} "
-                f"({question.payload['bayer_short']})"
-            ),
+            str(question.payload["display_label"]),
             color=renderer.ANSWER,
             fontsize=9.2,
             offset_points=(9.0, 8.0),

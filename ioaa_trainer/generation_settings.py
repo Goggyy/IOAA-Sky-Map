@@ -38,9 +38,9 @@ class GenerationSettings:
     fixed_lst_time: str = "12:00:00"
     fixed_mjd: float = 61256.0
     inverted_colors: bool = False
-    night_mode: bool = True
+    night_mode: bool = False
     sky_radius_degrees: float = 90.0
-    faintest_visible_magnitude: float = 6.5
+    faintest_visible_magnitude: float = 5.5
     star_marker_scale: float = 1.0
     enable_map_rotation: bool = True
 

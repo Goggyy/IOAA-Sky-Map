@@ -1,4 +1,4 @@
-"""Matplotlib rendering shared by blind exercises and the analysis window."""
+"""Matplotlib rendering shared by blind exercises, analysis, and study tools."""
 
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ class RenderOptions:
     show_zenith_label: bool = False
     limiting_magnitude: float | None = None
     star_marker_scale: float | None = None
+    hidden_star_hips: frozenset[int] = frozenset()
 
     @classmethod
     def blind(cls) -> "RenderOptions":
@@ -114,11 +115,20 @@ class SkyMapRenderer:
     MOON = NORMAL_PALETTE["MOON"]
     SUN = NORMAL_PALETTE["SUN"]
 
+    # Keep the polar chart on a fixed viewport.  Matplotlib's automatic
+    # layout engines resize an axes when outside labels, titles, or answer
+    # annotations appear; that made the sky circle jump in size when layers
+    # were toggled.  The reserved margin is deliberately large enough for
+    # cardinal/boundary labels to remain outside the stellar field.
+    SKY_AXES_POSITION = (0.10, 0.10, 0.80, 0.80)
+
     def __init__(self, figure: Figure) -> None:
         self.figure = figure
         self.axes = figure.add_subplot(111, projection="polar")
+        self.axes.set_position(self.SKY_AXES_POSITION)
         self._sky_radius_degrees = 90.0
         self.night_mode = False
+        self._interactive_star_artist = None
         self._apply_palette(False)
 
     def set_night_mode(self, enabled: bool) -> None:
@@ -144,7 +154,13 @@ class SkyMapRenderer:
         self._sky_radius_degrees = float(model.settings.sky_radius_degrees)
 
         ax = self.axes
+        self._interactive_star_artist = None
         ax.clear()
+        # ``clear`` preserves most geometry today, but explicitly restoring
+        # the viewport makes the invariant obvious and robust across
+        # Matplotlib versions.  Overlay visibility must never alter the sky
+        # circle's size.
+        ax.set_position(self.SKY_AXES_POSITION)
         ax.set_axis_on()
         self.figure.set_facecolor(self.BACKGROUND)
         ax.set_facecolor(self.BACKGROUND)
@@ -226,13 +242,16 @@ class SkyMapRenderer:
             & (star_radius >= 0.0)
             & (star_radius <= self._sky_radius_degrees)
         )
+        if options.hidden_star_hips:
+            visible_star_mask &= ~np.isin(
+                model.stars.hip,
+                tuple(options.hidden_star_hips),
+            )
         visible_magnitudes = model.stars.magnitude[visible_star_mask]
-        marker_sizes = np.clip(
-            max(0.15, float(marker_scale))
-            * 1.15
-            * (display_limit - visible_magnitudes + 0.65) ** 2,
-            0.45,
-            82.0,
+        marker_sizes = self._star_marker_sizes(
+            visible_magnitudes,
+            display_limit,
+            marker_scale,
         )
         ax.scatter(
             np.deg2rad(model.stars.azimuth[visible_star_mask]),
@@ -247,6 +266,8 @@ class SkyMapRenderer:
         if options.show_solar_system_objects or options.show_solar_system_labels:
             self._draw_solar_system_objects(
                 model,
+                display_limit=display_limit,
+                marker_scale=marker_scale,
                 show_labels=options.show_solar_system_labels,
             )
 
@@ -323,7 +344,121 @@ class SkyMapRenderer:
                 pad=20,
             )
 
-        self.figure.tight_layout(pad=1.0)
+        # Do not call tight_layout/constrained_layout here.  Labels outside
+        # the polar boundary are intentional and must not cause the axes to
+        # shrink or move between redraws.
+
+    def prepare_interactive_preview(
+        self,
+        model: SkyMapModel,
+        options: RenderOptions,
+    ) -> None:
+        """Prepare a lightweight, static background for zenith dragging.
+
+        Interactive zenith movement should not rebuild the complete scientific
+        chart on every mouse event.  This background intentionally keeps only
+        the local horizon/grid furniture; the star collection is added and
+        updated separately so the QtAgg canvas can blit just that artist.
+        The exact chart is rendered again when the interaction finishes.
+        """
+        self._apply_palette(bool(model.settings.inverted_colors))
+        self._sky_radius_degrees = float(model.settings.sky_radius_degrees)
+        self._interactive_star_artist = None
+
+        ax = self.axes
+        ax.clear()
+        ax.set_position(self.SKY_AXES_POSITION)
+        ax.set_axis_on()
+        self.figure.set_facecolor(self.BACKGROUND)
+        ax.set_facecolor(self.BACKGROUND)
+        ax.set_theta_zero_location(
+            "N",
+            offset=float(model.settings.map_rotation_degrees),
+        )
+        ax.set_theta_direction(-1)
+        ax.set_ylim(0.0, max(0.25, self._sky_radius_degrees))
+        ax.spines["polar"].set_color(self.HORIZON)
+        ax.spines["polar"].set_linewidth(0.9)
+        self._configure_horizontal_axes(options)
+        self._draw_physical_horizon()
+
+        if options.show_zenith_label:
+            ax.annotate(
+                "Zenith",
+                xy=(0.0, 0.0),
+                xytext=(5, 5),
+                textcoords="offset points",
+                color=self.MUTED,
+                fontsize=7.5,
+                rotation=0,
+                zorder=7,
+            )
+
+    def update_interactive_stars(
+        self,
+        model: SkyMapModel,
+        options: RenderOptions,
+    ):
+        """Update only the star artist used by the fast drag preview."""
+        display_limit = (
+            model.settings.limiting_magnitude
+            if options.limiting_magnitude is None
+            else min(
+                float(options.limiting_magnitude),
+                model.settings.limiting_magnitude,
+            )
+        )
+        marker_scale = (
+            model.settings.star_marker_scale
+            if options.star_marker_scale is None
+            else float(options.star_marker_scale)
+        )
+        star_radius = 90.0 - model.stars.altitude
+        visible = (
+            (model.stars.magnitude <= display_limit)
+            & np.isfinite(star_radius)
+            & np.isfinite(model.stars.azimuth)
+            & (star_radius >= 0.0)
+            & (star_radius <= self._sky_radius_degrees)
+        )
+        magnitudes = model.stars.magnitude[visible]
+        sizes = self._star_marker_sizes(
+            magnitudes,
+            display_limit,
+            marker_scale,
+        )
+        offsets = np.column_stack((
+            np.deg2rad(model.stars.azimuth[visible]),
+            star_radius[visible],
+        ))
+
+        artist = self._interactive_star_artist
+        if artist is None:
+            artist = self.axes.scatter(
+                offsets[:, 0] if len(offsets) else [],
+                offsets[:, 1] if len(offsets) else [],
+                s=sizes,
+                color=self.FOREGROUND,
+                linewidths=0,
+                alpha=0.95,
+                zorder=4,
+                animated=True,
+            )
+            self._interactive_star_artist = artist
+        else:
+            artist.set_offsets(offsets)
+            artist.set_sizes(sizes)
+            artist.set_color(self.FOREGROUND)
+        return artist
+
+    def freeze_interactive_preview(self) -> None:
+        """Keep the last preview frame paintable while exact work runs."""
+        if self._interactive_star_artist is not None:
+            self._interactive_star_artist.set_animated(False)
+
+    def end_interactive_preview(self) -> None:
+        """Forget preview-only artists; the next full draw rebuilds them."""
+        self._interactive_star_artist = None
 
     def _draw_physical_horizon(self) -> None:
         """Draw the true horizon when the chart extends below it."""
@@ -343,34 +478,67 @@ class SkyMapRenderer:
         self,
         model: SkyMapModel,
         *,
+        display_limit: float,
+        marker_scale: float,
         show_labels: bool,
     ) -> None:
         """Draw Sun, Moon, and planets within the selected chart coverage."""
-        marker_by_name = {
-            "Sun": ("*", 120.0, self.SUN),
-            "Moon": ("o", 58.0, self.MOON),
-        }
         for item in model.solar_system_objects:
             radius = 90.0 - item.altitude
             if not 0.0 <= radius <= self._sky_radius_degrees:
                 continue
-            marker, size, color = marker_by_name.get(
-                item.name,
-                ("D", 32.0, self.SOLAR_SYSTEM),
-            )
+            if item.name == "Sun":
+                marker, size, color = "*", 120.0, self.SUN
+                edgecolor = self.BACKGROUND
+                linewidth = 0.65
+                alpha = 1.0
+            elif item.name == "Moon":
+                # A ring-and-centre marker remains clear against both light
+                # and dark maps, unlike the previous plain grey disc.
+                self.axes.scatter(
+                    [math.radians(item.azimuth)],
+                    [radius],
+                    s=[76.0],
+                    marker="o",
+                    facecolors=self.BACKGROUND,
+                    edgecolors=self.MOON,
+                    linewidths=1.8,
+                    zorder=7,
+                )
+                marker, size, color = "o", 13.0, self.MOON
+                edgecolor = "none"
+                linewidth = 0.0
+                alpha = 1.0
+            else:
+                if item.magnitude is None or item.magnitude > display_limit:
+                    continue
+                marker = "o"
+                size = float(
+                    self._star_marker_sizes(
+                        np.asarray([item.magnitude]),
+                        display_limit,
+                        marker_scale,
+                    )[0]
+                )
+                color = self.FOREGROUND
+                edgecolor = "none"
+                linewidth = 0.0
+                alpha = 0.95
             self.axes.scatter(
                 [math.radians(item.azimuth)],
                 [radius],
                 s=[size],
                 marker=marker,
                 color=color,
-                edgecolors=self.BACKGROUND,
-                linewidths=0.65,
+                edgecolors=edgecolor,
+                linewidths=linewidth,
+                alpha=alpha,
                 zorder=7,
             )
             if show_labels:
+                label = "☾ Moon" if item.name == "Moon" else item.name
                 self.axes.annotate(
-                    item.name,
+                    label,
                     xy=(math.radians(item.azimuth), radius),
                     xytext=(5, 5),
                     textcoords="offset points",
@@ -387,12 +555,27 @@ class SkyMapRenderer:
                     },
                 )
 
+    @staticmethod
+    def _star_marker_sizes(
+        magnitudes: np.ndarray,
+        display_limit: float,
+        marker_scale: float,
+    ) -> np.ndarray:
+        """Return the one magnitude-to-dot-size scale used by stars and planets."""
+        return np.clip(
+            max(0.15, float(marker_scale))
+            * 1.15
+            * (float(display_limit) - magnitudes + 0.65) ** 2,
+            0.45,
+            82.0,
+        )
+
     def _configure_horizontal_axes(self, options: RenderOptions) -> None:
         ax = self.axes
         if options.show_direction_labels:
             ax.set_xticks(np.deg2rad(np.arange(0, 360, 45)))
             ax.set_xticklabels(["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
-            ax.tick_params(axis="x", colors=self.MUTED, labelsize=8)
+            ax.tick_params(axis="x", colors=self.MUTED, labelsize=8, pad=8)
             for label in ax.get_xticklabels():
                 label.set_rotation(0)
         else:

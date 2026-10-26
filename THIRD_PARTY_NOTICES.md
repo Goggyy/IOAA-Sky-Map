@@ -1,0 +1,9 @@
+# Third-party data
+
+The application source does not bundle the astronomy catalogues below. They are downloaded to the user's local cache on first use.
+
+- **Constellation lines:** The [Modern (Sky & Telescope) sky culture](https://github.com/Stellarium/stellarium/tree/eb47095a9282cf6b981f6e37fe1ea3a3ae0fd167/skycultures/modern_st) in Stellarium, by Paul Krizak and Jonathan E. Piskor, extended by G. Zotti. The app downloads the pinned [`constellationship.fab`](https://github.com/Stellarium/stellarium/blob/eb47095a9282cf6b981f6e37fe1ea3a3ae0fd167/skycultures/modern_st/constellationship.fab). The sky culture declares [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0/) in its [`info.ini`](https://github.com/Stellarium/stellarium/blob/eb47095a9282cf6b981f6e37fe1ea3a3ae0fd167/skycultures/modern_st/info.ini). The app reads and plots the line data; it does not modify or redistribute the source file.
+- **Star catalogue:** [ESA Hipparcos](https://www.cosmos.esa.int/web/hipparcos/catalogues), loaded through [Skyfield](https://rhodesmill.org/skyfield/stars.html). ESA lists the catalogue under [CC BY-NC 3.0 IGO](https://creativecommons.org/licenses/by-nc/3.0/igo/) and requests the acknowledgement **Credit: ESA**. The catalogue file is downloaded and cached locally; it is not in this source release.
+- **World map:** Bundled Natural Earth 1:110m land data in `ioaa_trainer/ne_110m_land.geojson`. [Natural Earth places its map data in the public domain](https://www.naturalearthdata.com/about/terms-of-use/).
+
+The app's GPLv3 licence applies to the app code. It does not replace separate terms for third-party data. If you redistribute downloaded catalogues or exported maps, review the relevant data terms, including Hipparcos's noncommercial restriction, and retain appropriate credits.

@@ -54,6 +54,7 @@ class SolarSystemObject:
     name: str
     altitude: float
     azimuth: float
+    magnitude: float | None = None
 
 
 @dataclass(frozen=True)

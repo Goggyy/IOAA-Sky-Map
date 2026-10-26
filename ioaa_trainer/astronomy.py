@@ -19,6 +19,7 @@ from astropy.coordinates import (
     ICRS,
     SkyCoord,
     get_body,
+    get_body_barycentric,
 )
 from astropy.time import Time
 from astropy.utils import iers
@@ -237,15 +238,13 @@ class SkyMapCalculator:
         celestial_equator = self._equatorial_curve(0.0, altaz_frame)
         galactic_equator = self._galactic_curve(altaz_frame)
         coordinate_grid = self._coordinate_grid(altaz_frame)
-        solar_system_objects = (
-            self._solar_system_objects(
-                observation_time,
-                location,
-                altaz_frame,
-                minimum_altitude,
-            )
-            if settings.include_solar_system_objects
-            else ()
+        # Keep these positions in every model so the Analyse view can toggle
+        # the layer on even when it was hidden on the original exercise map.
+        solar_system_objects = self._solar_system_objects(
+            observation_time,
+            location,
+            altaz_frame,
+            minimum_altitude,
         )
 
         return SkyMapModel(
@@ -282,6 +281,8 @@ class SkyMapCalculator:
             "Uranus",
             "Neptune",
         )
+        sun_position = get_body_barycentric("sun", observation_time)
+        earth_position = get_body_barycentric("earth", observation_time)
         visible: list[SolarSystemObject] = []
         for display_name in object_names:
             coordinate = get_body(
@@ -301,9 +302,76 @@ class SkyMapCalculator:
                         name=display_name,
                         altitude=altitude,
                         azimuth=azimuth,
+                        magnitude=self._planet_apparent_magnitude(
+                            display_name,
+                            observation_time,
+                            sun_position,
+                            earth_position,
+                        ),
                     )
                 )
         return tuple(visible)
+
+    @staticmethod
+    def _planet_apparent_magnitude(
+        name: str,
+        observation_time: Time,
+        sun_position,
+        earth_position,
+    ) -> float | None:
+        """Approximate a planet's visual magnitude from distance and phase.
+
+        The compact formulae are sufficient for matching the visual scale of
+        the star catalogue.  The Sun and Moon retain their separate map
+        symbols, so no stellar magnitude is assigned to them here.
+        """
+        if name in {"Sun", "Moon"}:
+            return None
+
+        planet_position = get_body_barycentric(name.lower(), observation_time)
+        sun_to_planet = planet_position.xyz - sun_position.xyz
+        earth_to_planet = planet_position.xyz - earth_position.xyz
+        planet_to_sun = -sun_to_planet
+        planet_to_earth = -earth_to_planet
+        heliocentric_distance = float(np.linalg.norm(sun_to_planet.to_value(u.au)))
+        geocentric_distance = float(np.linalg.norm(earth_to_planet.to_value(u.au)))
+        cosine_phase = float(
+            np.dot(
+                planet_to_sun.to_value(u.au),
+                planet_to_earth.to_value(u.au),
+            )
+            / (heliocentric_distance * geocentric_distance)
+        )
+        phase_angle = math.degrees(math.acos(np.clip(cosine_phase, -1.0, 1.0)))
+        distance_term = 5.0 * math.log10(
+            heliocentric_distance * geocentric_distance
+        )
+
+        if name == "Mercury":
+            phase_term = (
+                0.0380 * phase_angle
+                - 0.000273 * phase_angle**2
+                + 0.000002 * phase_angle**3
+            )
+            return -0.42 + distance_term + phase_term
+        if name == "Venus":
+            phase_term = (
+                0.0009 * phase_angle
+                + 0.000239 * phase_angle**2
+                - 0.00000065 * phase_angle**3
+            )
+            return -4.40 + distance_term + phase_term
+        if name == "Mars":
+            return -1.52 + distance_term + 0.016 * phase_angle
+        if name == "Jupiter":
+            return -9.40 + distance_term + 0.005 * phase_angle
+        if name == "Saturn":
+            return -8.88 + distance_term + 0.044 * phase_angle
+        if name == "Uranus":
+            return -7.19 + distance_term
+        if name == "Neptune":
+            return -6.87 + distance_term
+        return None
 
     @staticmethod
     def _to_altaz(coords: SkyCoord, frame: AltAz) -> tuple[np.ndarray, np.ndarray]:

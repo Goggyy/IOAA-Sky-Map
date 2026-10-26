@@ -1,4 +1,4 @@
-"""Exercise 8: estimate local sidereal time from the local meridian."""
+"""Exercise 7: estimate local sidereal time from the local meridian."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def _format_ra(hours: float) -> str:
 
 class EstimateLSTActivity(SkyActivity):
     activity_id = "estimate_lst"
-    title = "Exercise 8 — Estimate the LST"
+    title = "7 · Estimate LST"
     description = (
         "Estimate local sidereal time from the star field. The local meridian is "
         "drawn on the question chart; the solution gives the true LST and nearby "

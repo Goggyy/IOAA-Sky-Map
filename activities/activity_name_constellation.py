@@ -1,4 +1,4 @@
-"""Exercise 5: name the constellation whose general area is circled."""
+"""Exercise 4: name the constellation whose general area is circled."""
 
 from __future__ import annotations
 
@@ -14,17 +14,19 @@ from ioaa_trainer.activity_ui import run_activity
 from ioaa_trainer.models import ActivityQuestion, SkyMapModel
 from ioaa_trainer.rendering import SkyMapRenderer
 from ioaa_trainer.targeting import constellation_target_region
+from activities.activity_constellation import CONSTELLATION_SET_BY_KEY, ConstellationActivity
 
 
 class NameConstellationActivity(SkyActivity):
     activity_id = "name_constellation"
-    title = "Exercise 5 — Name the Constellation"
+    title = "4 · Name Constellation"
     description = (
         "A circle marks the general area of a visible constellation. Identify the "
         "constellation from the surrounding star pattern."
     )
     minimum_visible_edges = 3
     minimum_target_altitude = 10.0
+    activity_options = ConstellationActivity.activity_options
 
     def create_question(
         self,
@@ -32,10 +34,13 @@ class NameConstellationActivity(SkyActivity):
         rng: random.Random,
     ) -> ActivityQuestion:
         counts = model.visible_constellation_edge_counts()
+        selected_set = CONSTELLATION_SET_BY_KEY[self.selected_option("constellation_set")]
         candidates: list[tuple[str, float, float, float]] = []
 
         for abbreviation, count in counts.items():
             if count < self.minimum_visible_edges:
+                continue
+            if selected_set.abbreviations is not None and abbreviation not in selected_set.abbreviations:
                 continue
             region = constellation_target_region(model, abbreviation)
             if region is None or region.altitude < self.minimum_target_altitude:
@@ -50,7 +55,7 @@ class NameConstellationActivity(SkyActivity):
             )
 
         if not candidates:
-            raise QuestionUnavailable("no suitable constellation target is clearly visible")
+            raise QuestionUnavailable(f"no suitable {selected_set.label.lower()} constellation is clearly visible")
 
         abbreviation, altitude, azimuth, diameter = rng.choice(sorted(candidates))
         name = model.constellation_names.get(abbreviation, abbreviation)
@@ -63,6 +68,7 @@ class NameConstellationActivity(SkyActivity):
                 "altitude": altitude,
                 "azimuth": azimuth,
                 "diameter_points": diameter,
+                "constellation_set": selected_set.key,
             },
         )
 

@@ -17,7 +17,7 @@ from ioaa_trainer.rendering import SkyMapRenderer
 
 class CelestialEquatorActivity(SkyActivity):
     activity_id = "celestial_equator"
-    title = "Exercise 1 — Celestial Equator and Cardinal Directions"
+    title = "1 · Celestial Pole and Related"
     description = (
         "Identify the celestial equator, the four cardinal directions, one celestial "
         "pole, and estimate the observer's latitude from a blind sky map."
